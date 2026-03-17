@@ -116,3 +116,21 @@ def test_qa_stream_keeps_legacy_event_order_and_payload_shape(tmp_path: Path):
     assert 'step_title' not in text
     assert 'new_node_ids' not in text
     assert 'focus_node_ids' not in text
+
+
+def test_qa_stream_emits_new_trace_events_in_order(tmp_path: Path):
+    input_file = tmp_path / 'ontology.md'
+    _write_relation_ontology(input_file)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'PoD 有什么关系'})
+    text = response.text
+
+    assert 'event: trace_anchor' in text
+    assert 'event: trace_expand' in text
+    assert 'event: evidence_final' in text
+    assert text.index('event: trace_anchor') < text.index('event: trace_expand')
+    assert text.index('event: trace_expand') < text.index('event: evidence_final')
+    assert text.index('event: evidence_final') < text.index('event: answer_done')
+    assert '"delay_ms":' in text

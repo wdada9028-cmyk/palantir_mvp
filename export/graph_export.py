@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import html
 import json
@@ -134,6 +134,11 @@ def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive
     .qa-submit { border: none; border-radius: 10px; padding: 8px 14px; background: linear-gradient(135deg, #2563eb, #7c3aed); color: white; font-weight: 700; cursor: pointer; }
     .qa-card { margin-top: 14px; border-radius: 14px; background: rgba(15,23,42,0.48); border: 1px solid rgba(148,163,184,0.24); padding: 12px; }
     .qa-card-title { font-size: 13px; font-weight: 700; color: #bfdbfe; margin-bottom: 8px; }
+    @keyframes tracePulse { 0% { transform: scale(1); box-shadow: 0 0 0 rgba(96,165,250,0.0); } 50% { transform: scale(1.01); box-shadow: 0 0 18px rgba(96,165,250,0.35); } 100% { transform: scale(1); box-shadow: 0 0 0 rgba(96,165,250,0.0); } }
+    .searching-node { animation: tracePulse 1.2s ease-in-out infinite; }
+    .trace-path { box-shadow: 0 0 0 1px rgba(249,115,22,0.35); }
+    .trace-dimmed { opacity: 0.38; }
+    .evidence-timeline button { width: 100%; text-align: left; }
   </style>
 </head>
 <body>
@@ -160,7 +165,7 @@ def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive
         <div class="qa-actions"><button id="qa-submit" class="qa-submit">提问</button></div>
         <div id="qa-status" class="qa-card hidden"><div class="qa-card-title">状态</div><div>等待提问</div></div>
         <div id="qa-answer" class="qa-card hidden"><div class="qa-card-title">答案</div><div>等待回答</div></div>
-        <div id="qa-evidence-chain" class="qa-card hidden"><div class="qa-card-title">证据链</div><div>等待检索</div></div>
+        <div id="evidence-timeline" class="qa-card hidden evidence-timeline"><div class="qa-card-title">证据时间线</div><div>等待检索</div></div>
       </section>
   </div>
   <script>__CYTOSCAPE_BUNDLE__
@@ -180,14 +185,16 @@ window.cytoscape = window.cytoscape || cytoscape;
     const qaSubmitButton = document.getElementById('qa-submit');
     const qaStatusCard = document.getElementById('qa-status');
     const qaAnswerCard = document.getElementById('qa-answer');
-    const qaEvidenceChainCard = document.getElementById('qa-evidence-chain');
+    const qaEvidenceTimelineCard = document.getElementById('evidence-timeline');
     const qaStatusBody = qaStatusCard.querySelector('div:last-child');
     const qaAnswerBody = qaAnswerCard.querySelector('div:last-child');
-    const qaEvidenceChainBody = qaEvidenceChainCard.querySelector('div:last-child');
+    const qaEvidenceTimelineBody = qaEvidenceTimelineCard.querySelector('div:last-child');
     const defaultPanelHtml = __DEFAULT_PANEL_JSON__;
     let qaEventSource = null;
     let persistedEvidenceChain = [];
     let persistedEvidenceMap = new Map();
+    let evidenceSnapshots = new Map();
+    let playbackController = null;
 
     relationFilter.innerHTML = ['<option value="all">全部关系</option>']
       .concat(graphPayload.relationTypes.map(item => `<option value="${item}">${item}</option>`))
@@ -263,8 +270,12 @@ window.cytoscape = window.cytoscape || cytoscape;
         { selector: '.metric-hidden', style: { display: 'none' } },
         { selector: '.filtered-hidden', style: { display: 'none' } },
         { selector: '.dimmed', style: { opacity: 0.12 } },
+        { selector: '.trace-dimmed', style: { opacity: 0.12 } },
         { selector: '.highlighted', style: { opacity: 1, 'border-color': '#2563eb', 'border-width': 4 } },
-        { selector: 'edge.highlighted', style: { 'line-color': '#2563eb', 'target-arrow-color': '#2563eb', 'width': 4 } }
+        { selector: 'edge.highlighted', style: { 'line-color': '#2563eb', 'target-arrow-color': '#2563eb', 'width': 4 } },
+        { selector: 'node.trace-path', style: { 'border-color': '#f97316', 'border-width': 4, 'shadow-color': 'rgba(249,115,22,0.35)', 'shadow-blur': 24, 'shadow-opacity': 1 } },
+        { selector: 'edge.trace-path', style: { 'line-color': '#f97316', 'target-arrow-color': '#f97316', 'width': 5 } },
+        { selector: 'node.searching-node', style: { 'border-color': '#38bdf8', 'border-width': 5, 'overlay-color': '#60a5fa', 'overlay-opacity': 0.18, 'overlay-padding': 12 } }
       ]
     });
 
@@ -350,7 +361,7 @@ window.cytoscape = window.cytoscape || cytoscape;
 
     function setQaStatus(message) {
       qaStatusCard.classList.remove('hidden');
-      qaStatusBody.textContent = message || '等待提问';
+      qaStatusBody.textContent = message || '\\u7b49\\u5f85\\u63d0\\u95ee';
     }
 
     function setQaAnswer(message) {
@@ -358,14 +369,36 @@ window.cytoscape = window.cytoscape || cytoscape;
       qaAnswerBody.innerHTML = escapeHtml(message || '');
     }
 
+    function clearTraceClasses() {
+      cy.elements().removeClass('trace-path');
+      cy.elements().removeClass('trace-dimmed');
+      cy.elements().removeClass('searching-node');
+      cy.elements().removeClass('highlighted');
+      cy.elements().removeClass('dimmed');
+    }
+
+    function clearPlaybackTimers(controller) {
+      if (!controller || !Array.isArray(controller.timers)) return;
+      controller.timers.forEach(timer => window.clearTimeout(timer));
+      controller.timers = [];
+    }
+
     function clearQaPresentation() {
-      setQaStatus('\u7b49\u5f85\u63d0\u95ee');
+      setQaStatus('\\u7b49\\u5f85\\u63d0\\u95ee');
       qaAnswerCard.classList.add('hidden');
-      qaAnswerBody.textContent = '\u7b49\u5f85\u56de\u7b54';
-      qaEvidenceChainCard.classList.add('hidden');
-      qaEvidenceChainBody.innerHTML = '\u7b49\u5f85\u68c0\u7d22';
+      qaAnswerBody.textContent = '\\u7b49\\u5f85\\u56de\\u7b54';
+      qaEvidenceTimelineCard.classList.add('hidden');
+      qaEvidenceTimelineBody.innerHTML = '\\u7b49\\u5f85\\u68c0\\u7d22';
       persistedEvidenceChain = [];
       persistedEvidenceMap = new Map();
+      evidenceSnapshots = new Map();
+      clearTraceClasses();
+      clearPlaybackTimers(playbackController);
+      if (playbackController) {
+        playbackController.queue = [];
+        playbackController.running = false;
+        playbackController.traceProtocolSeen = false;
+      }
     }
 
     function buildFocusCollection(nodeIds, edgeIds) {
@@ -381,33 +414,94 @@ window.cytoscape = window.cytoscape || cytoscape;
       return collection;
     }
 
-    function replayEvidenceFocus(evidenceId) {
-      const item = persistedEvidenceMap.get(evidenceId);
-      if (!item) return;
-      focusEvidence(item.node_ids || [], item.edge_ids || []);
-      setQaStatus(`回放证据 ${evidenceId}`);
+    function normalizeSnapshot(snapshot) {
+      const nodeIds = Array.isArray(snapshot && snapshot.node_ids) ? snapshot.node_ids.filter(Boolean) : [];
+      const edgeIds = Array.isArray(snapshot && snapshot.edge_ids) ? snapshot.edge_ids.filter(Boolean) : [];
+      return { node_ids: [...new Set(nodeIds)], edge_ids: [...new Set(edgeIds)] };
     }
 
-    function renderEvidenceChain(chain) {
-      qaEvidenceChainCard.classList.remove('hidden');
+    function replayFromSnapshot(snapshot, options = {}) {
+      const normalized = normalizeSnapshot(snapshot || {});
+      clearTraceClasses();
+      const collection = buildFocusCollection(normalized.node_ids, normalized.edge_ids);
+      if (!collection.length) {
+        cy.elements(':visible').removeClass('trace-dimmed');
+        return normalized;
+      }
+      cy.elements(':visible').addClass('trace-dimmed');
+      collection.removeClass('trace-dimmed');
+      collection.addClass('trace-path');
+      collection.nodes().addClass('searching-node');
+      collection.addClass('highlighted');
+      if (options.fit !== false) {
+        cy.animate({
+          fit: { eles: collection, padding: 90 },
+          duration: typeof options.duration === 'number' ? options.duration : 320,
+        });
+      }
+      window.setTimeout(() => {
+        collection.removeClass('highlighted');
+      }, typeof options.pulseDuration === 'number' ? options.pulseDuration : 360);
+      return normalized;
+    }
+
+    function focusEvidence(nodeIds, edgeIds) {
+      replayFromSnapshot({ node_ids: nodeIds || [], edge_ids: edgeIds || [] });
+    }
+
+    function buildEvidenceSnapshots(chain, searchTrace) {
+      const snapshots = new Map();
+      const seedNodeIds = Array.isArray(searchTrace && searchTrace.seed_node_ids) ? searchTrace.seed_node_ids : [];
+      const expansionSteps = Array.isArray(searchTrace && searchTrace.expansion_steps) ? searchTrace.expansion_steps : [];
+      const seedSnapshot = normalizeSnapshot({ node_ids: seedNodeIds, edge_ids: [] });
+      let relationIndex = 0;
+      let latestSnapshot = seedSnapshot;
+      (chain || []).forEach(item => {
+        let snapshot = latestSnapshot;
+        if (item.kind === 'seed') {
+          snapshot = seedSnapshot.node_ids.length ? seedSnapshot : normalizeSnapshot({ node_ids: item.node_ids || [], edge_ids: item.edge_ids || [] });
+        } else if (item.kind === 'relation' && expansionSteps[relationIndex]) {
+          const traceStep = expansionSteps[relationIndex];
+          relationIndex += 1;
+          snapshot = normalizeSnapshot({
+            node_ids: traceStep.snapshot_node_ids || item.node_ids || [],
+            edge_ids: traceStep.snapshot_edge_ids || item.edge_ids || [],
+          });
+        } else if (item && item.evidence_id) {
+          snapshot = normalizeSnapshot({ node_ids: item.node_ids || [], edge_ids: item.edge_ids || [] });
+        }
+        latestSnapshot = snapshot;
+        if (item && item.evidence_id) {
+          snapshots.set(item.evidence_id, snapshot);
+        }
+      });
+      return snapshots;
+    }
+
+    function renderEvidenceTimeline(chain) {
+      qaEvidenceTimelineCard.classList.remove('hidden');
       if (!Array.isArray(chain) || chain.length === 0) {
-        qaEvidenceChainBody.innerHTML = '<div class="muted">\u6682\u65e0\u8bc1\u636e</div>';
+        qaEvidenceTimelineBody.innerHTML = '<div class="muted">\u6682\u65e0\u8bc1\u636e</div>';
         return;
       }
-      qaEvidenceChainBody.innerHTML = chain.map(item => {
+      qaEvidenceTimelineBody.innerHTML = chain.map(item => {
         const reasons = Array.isArray(item.why_matched) && item.why_matched.length
-          ? `<div style="margin-top:6px;color:#93c5fd;font-size:12px;">${item.why_matched.map(reason => escapeHtml(reason)).join('?')}</div>`
+          ? `<div style="margin-top:6px;color:#93c5fd;font-size:12px;">${item.why_matched.map(reason => escapeHtml(reason)).join('<br />')}</div>`
           : '';
         return `
           <button type="button" data-evidence-id="${escapeHtml(item.evidence_id)}" style="display:block;width:100%;text-align:left;background:rgba(30,41,59,0.9);border:1px solid rgba(148,163,184,0.28);border-radius:12px;color:#e2e8f0;padding:10px 12px;margin:0 0 10px 0;cursor:pointer;">
-            <div style="font-weight:700;color:#bfdbfe;">[${escapeHtml(item.evidence_id)}] ${escapeHtml(item.label || item.kind || '证据')}</div>
+            <div style="font-weight:700;color:#bfdbfe;">[${escapeHtml(item.evidence_id)}] ${escapeHtml(item.label || item.kind || '\\u8bc1\\u636e')}</div>
             <div style="margin-top:4px;line-height:1.5;">${escapeHtml(item.message || '')}</div>
             ${reasons}
           </button>
         `;
       }).join('');
-      qaEvidenceChainBody.querySelectorAll('[data-evidence-id]').forEach(button => {
-        button.addEventListener('click', () => replayEvidenceFocus(button.dataset.evidenceId));
+      qaEvidenceTimelineBody.querySelectorAll('[data-evidence-id]').forEach(button => {
+        button.addEventListener('click', () => {
+          const snapshot = evidenceSnapshots.get(button.dataset.evidenceId) || { node_ids: [], edge_ids: [] };
+          replayFromSnapshot(snapshot, { fit: true, duration: 280, pulseDuration: 420 });
+          setQaStatus(`\\u56de\\u653e\\u8bc1\\u636e ${button.dataset.evidenceId}`);
+        });
       });
     }
 
@@ -415,13 +509,14 @@ window.cytoscape = window.cytoscape || cytoscape;
       if (!evidence || !evidence.evidence_id) return;
       persistedEvidenceMap.set(evidence.evidence_id, evidence);
       persistedEvidenceChain = Array.from(persistedEvidenceMap.values());
-      renderEvidenceChain(persistedEvidenceChain);
+      renderEvidenceTimeline(persistedEvidenceChain);
     }
 
     function persistFinalEvidence(result) {
       persistedEvidenceChain = Array.isArray(result.evidence_chain) ? result.evidence_chain : [];
       persistedEvidenceMap = new Map(persistedEvidenceChain.map(item => [item.evidence_id, item]));
-      renderEvidenceChain(persistedEvidenceChain);
+      evidenceSnapshots = buildEvidenceSnapshots(persistedEvidenceChain, result.search_trace || {});
+      renderEvidenceTimeline(persistedEvidenceChain);
     }
 
     function playRetrievalEvent(eventType, payload) {
@@ -437,11 +532,68 @@ window.cytoscape = window.cytoscape || cytoscape;
       if (eventType === 'evidence' && payload.evidence) {
         appendEvidenceIncrementally(payload.evidence);
         focusEvidence(nodeIds, edgeIds);
-        return;
       }
-      if (eventType === 'answer_done') {
-        persistFinalEvidence(payload);
-        setQaAnswer(payload.answer || '');
+    }
+
+    class PlaybackController {
+      constructor(cyInstance) {
+        this.cy = cyInstance;
+        this.queue = [];
+        this.running = false;
+        this.timers = [];
+        this.traceProtocolSeen = false;
+      }
+
+      enqueue(eventType, payload) {
+        if (['trace_anchor', 'trace_expand', 'evidence_final'].includes(eventType)) {
+          this.traceProtocolSeen = true;
+        }
+        this.queue.push({ eventType, payload });
+        if (!this.running) {
+          this.drain();
+        }
+      }
+
+      drain() {
+        if (!this.queue.length) {
+          this.running = false;
+          return;
+        }
+        this.running = true;
+        const item = this.queue.shift();
+        this.play(item.eventType, item.payload);
+        const delay = ['trace_anchor', 'trace_expand'].includes(item.eventType)
+          ? Math.max(Number(item.payload && item.payload.delay_ms) || 0, 0)
+          : 0;
+        const timer = window.setTimeout(() => this.drain(), delay);
+        this.timers.push(timer);
+      }
+
+      play(eventType, payload) {
+        if (payload && payload.message) {
+          setQaStatus(payload.message);
+        }
+        if (eventType === 'trace_anchor') {
+          replayFromSnapshot({ node_ids: payload.node_ids || [], edge_ids: payload.edge_ids || [] }, { fit: true, duration: 340 });
+          return;
+        }
+        if (eventType === 'trace_expand') {
+          replayFromSnapshot({
+            node_ids: payload.snapshot_node_ids || payload.node_ids || [],
+            edge_ids: payload.snapshot_edge_ids || payload.edge_ids || [],
+          }, { fit: true, duration: 340, pulseDuration: 420 });
+          return;
+        }
+        if (eventType === 'evidence_final') {
+          persistFinalEvidence(payload || {});
+          return;
+        }
+        if (eventType === 'answer_done') {
+          if (!this.traceProtocolSeen) {
+            persistFinalEvidence(payload || {});
+          }
+          setQaAnswer(payload.answer || '');
+        }
       }
     }
 
@@ -453,14 +605,17 @@ window.cytoscape = window.cytoscape || cytoscape;
         qaEventSource.close();
         qaEventSource = null;
       }
+      if (!playbackController) {
+        playbackController = new PlaybackController(cy);
+      }
       clearQaPresentation();
-      setQaStatus('\u6b63\u5728\u68c0\u7d22\u672c\u4f53\u8bc1\u636e...');
+      setQaStatus('\\u6b63\\u5728\\u68c0\\u7d22\\u672c\\u4f53\\u8bc1\\u636e...');
       const eventSource = new EventSource(`/api/qa/stream?q=${encodeURIComponent(trimmedQuestion)}`);
       qaEventSource = eventSource;
-      ['anchor_node', 'expand_neighbors', 'filter_nodes', 'focus_subgraph', 'evidence', 'answer_done'].forEach(eventType => {
+      ['trace_anchor', 'trace_expand', 'evidence_final', 'answer_done'].forEach(eventType => {
         eventSource.addEventListener(eventType, event => {
           const payload = JSON.parse(event.data);
-          playRetrievalEvent(eventType, payload);
+          playbackController.enqueue(eventType, payload);
           if (eventType === 'answer_done') {
             eventSource.close();
             if (qaEventSource === eventSource) {
@@ -469,8 +624,17 @@ window.cytoscape = window.cytoscape || cytoscape;
           }
         });
       });
+      ['anchor_node', 'expand_neighbors', 'filter_nodes', 'focus_subgraph', 'evidence'].forEach(eventType => {
+        eventSource.addEventListener(eventType, event => {
+          const payload = JSON.parse(event.data);
+          if (playbackController && playbackController.traceProtocolSeen) {
+            return;
+          }
+          playRetrievalEvent(eventType, payload);
+        });
+      });
       eventSource.addEventListener('error', () => {
-        setQaStatus('\u95ee\u7b54\u6d41\u5df2\u4e2d\u65ad');
+        setQaStatus('\\u95ee\\u7b54\\u6d41\\u5df2\\u4e2d\\u65ad');
         eventSource.close();
         if (qaEventSource === eventSource) {
           qaEventSource = null;

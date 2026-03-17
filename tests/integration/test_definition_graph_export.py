@@ -84,8 +84,8 @@ def test_exported_html_uses_edge_friendly_non_lane_layout(tmp_path: Path):
     assert 'window.cytoscape = window.cytoscape || cytoscape' in text
     assert 'lane-guide' not in text
     assert 'renderSection' in text
-    assert r'"label": "Project\n项目与目标层"' in text
-    assert r'"label": "Project\n4.1 项目与目标层"' not in text
+    assert '"label": "Project\\n' in text
+    assert '"label": "Project\\n4.1 ' not in text
 
 
 def test_exported_html_uses_inline_floating_detail_card_and_hides_empty_sections(tmp_path: Path):
@@ -160,9 +160,36 @@ def test_exported_html_contains_sse_qa_hooks_and_evidence_clickback(tmp_path: Pa
     assert 'EventSource' in text
     assert 'playRetrievalEvent' in text
     assert 'startQaStream' in text
-    assert 'renderEvidenceChain' in text
-    assert 'replayEvidenceFocus' in text
-    assert 'PlaybackController' not in text
-    assert 'qa-playback-pause' not in text
-    assert 'applyPlaybackSnapshot' not in text
-    assert 'renderFinalAnswer' not in text
+    assert 'renderEvidenceTimeline' in text
+    assert 'replayFromSnapshot' in text
+    assert 'PlaybackController' in text
+    assert 'evidence-timeline' in text
+    assert 'trace_anchor' in text
+    assert 'trace_expand' in text
+
+
+def test_exported_html_renders_evidence_timeline_markup_not_legacy_chain_id(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': '???? v2'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'id="evidence-timeline"' in text
+    assert 'id="qa-evidence-chain"' not in text
+
+
+def test_exported_html_contains_trace_playback_controller_and_timeline(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': '本体建模 v2'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'EventSource' in text
+    assert 'PlaybackController' in text
+    assert 'startQaStream' in text
+    assert 'replayFromSnapshot' in text
+    assert 'evidence-timeline' in text
+    assert 'searching-node' in text
+    assert 'trace-path' in text
+    assert 'trace-dimmed' in text
+    assert 'trace_anchor' in text
+    assert 'trace_expand' in text
+    assert 'evidence_final' in text

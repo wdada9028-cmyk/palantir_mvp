@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 
 from ..models.ontology import OntologyGraph, OntologyObject, OntologyRelation
-from .ontology_query_models import EvidenceItem, OntologyEvidenceBundle, RetrievalStep
+from .ontology_query_models import EvidenceItem, OntologyEvidenceBundle, RetrievalStep, SearchTrace, TraceExpansionStep
 
 _RUNTIME_HINTS = {
     '宕机', '离线', '在线', '实时', '状态', '当前', '现在', '今天', '昨天', '最近',
@@ -45,6 +45,9 @@ def retrieve_ontology_evidence(graph: OntologyGraph, question: str) -> OntologyE
     evidence_chain: list[EvidenceItem] = []
     evidence_counter = 1
     evidence_ids_for_steps: list[str] = []
+    trace_snapshot_node_ids = list(seed_node_ids)
+    trace_snapshot_edge_ids: list[str] = []
+    expansion_steps: list[TraceExpansionStep] = []
 
     for node_id in seed_node_ids:
         obj = graph.get_object(node_id)
@@ -70,11 +73,25 @@ def retrieve_ontology_evidence(graph: OntologyGraph, question: str) -> OntologyE
         if relation.source_id in seed_node_ids or relation.target_id in seed_node_ids:
             matched_edge_ids.append(edge_id)
             matched_node_ids.extend([relation.source_id, relation.target_id])
+            trace_snapshot_node_ids.extend([relation.source_id, relation.target_id])
+            trace_snapshot_edge_ids.append(edge_id)
+            reason_lines = _dedupe_preserve_order(relation_reason_map.get(edge_id) or ['关系邻接扩展'])
+            expansion_steps.append(
+                TraceExpansionStep(
+                    step=len(expansion_steps) + 1,
+                    from_node_id=relation.source_id,
+                    edge_id=edge_id,
+                    to_node_id=relation.target_id,
+                    relation=relation.relation,
+                    reason='；'.join(reason_lines),
+                    snapshot_node_ids=_dedupe_preserve_order(list(trace_snapshot_node_ids)),
+                    snapshot_edge_ids=_dedupe_preserve_order(list(trace_snapshot_edge_ids)),
+                )
+            )
             evidence_id = _evidence_id(evidence_counter)
             evidence_counter += 1
             evidence_ids_for_steps.append(evidence_id)
             label = f'{_object_label(graph, relation.source_id)} {relation.relation} {_object_label(graph, relation.target_id)}'
-            reason_lines = relation_reason_map.get(edge_id) or ['关系邻接扩展']
             evidence_chain.append(
                 EvidenceItem(
                     evidence_id=evidence_id,
@@ -83,7 +100,7 @@ def retrieve_ontology_evidence(graph: OntologyGraph, question: str) -> OntologyE
                     message=str(relation.attributes.get('description', '') or label),
                     node_ids=[relation.source_id, relation.target_id],
                     edge_ids=[edge_id],
-                    why_matched=_dedupe_preserve_order(reason_lines),
+                    why_matched=reason_lines,
                 )
             )
 
@@ -153,6 +170,10 @@ def retrieve_ontology_evidence(graph: OntologyGraph, question: str) -> OntologyE
         highlight_steps=highlight_steps,
         evidence_chain=evidence_chain,
         insufficient_evidence=insufficient_evidence,
+        search_trace=SearchTrace(
+            seed_node_ids=list(seed_node_ids),
+            expansion_steps=expansion_steps,
+        ),
     )
 
 
