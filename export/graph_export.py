@@ -1,0 +1,998 @@
+﻿from __future__ import annotations
+
+import html
+import json
+import math
+import re
+import subprocess
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from ..schema import OntologyGraph
+
+
+BROWSER_CANDIDATES = [
+    Path(r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'),
+    Path(r'C:\Program Files\Microsoft\Edge\Application\msedge.exe'),
+    Path(r'C:\Program Files\Google\Chrome\Application\chrome.exe'),
+    Path(r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe'),
+]
+
+RELATION_TRANSLATIONS = {
+    'HAS': '包含',
+    'AGGREGATES': '聚合',
+    'APPLIES_TO': '作用于',
+    'ASSIGNED_TO': '分配到',
+    'ASSIGNS': '指派给',
+    'CONSTRAINS': '约束',
+    'CONTAINS': '包含',
+    'DEFINES': '定义',
+    'DELIVERS': '交付',
+    'DEPENDS_ON': '依赖',
+    'EXECUTES': '执行',
+    'GENERATES': '生成',
+    'OCCURS_AT': '发生于落位',
+    'OCCURS_IN': '发生于机房',
+    'REFERENCES': '引用',
+    'SHIPS': '运输',
+    'USES': '使用',
+}
+
+GROUP_ORDER = [
+    '项目与目标层',
+    '空间层',
+    '设备与物流层',
+    '活动与排期层',
+    '施工执行层',
+    '决策与解释层',
+]
+
+DEFAULT_TYPE_COLORS = {
+    'ObjectType': '#2563eb',
+    'DerivedMetric': '#7c3aed',
+    'MetricGroup': '#6d28d9',
+}
+
+METRIC_GROUP_ID = 'metric_group:关键派生指标'
+
+
+
+def _load_cytoscape_bundle() -> str:
+    asset_path = Path(__file__).resolve().parent / 'assets' / 'cytoscape.min.js'
+    return asset_path.read_text(encoding='utf-8')
+
+
+def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive Ontology Graph') -> str:
+    payload = build_graph_payload(graph)
+    payload_json = json.dumps(payload, ensure_ascii=False)
+    cytoscape_bundle = _load_cytoscape_bundle()
+    relation_legend_html = ''.join(
+        f'<div class="legend-row"><span class="legend-en">{html.escape(item["relation"])}：{html.escape(item["translation"])}</span></div>'
+        for item in payload['relationLegend']
+    )
+    default_panel_html = (
+        '<div class="hero-card">'
+        '<div class="hero-title">节点详情</div>'
+        '<div class="hero-subtitle">点击左侧节点查看定义、属性和关系摘要。</div>'
+        '</div>'
+        '<div class="detail-card">'
+        '<div class="section-title">关系摘要</div>'
+        '<p class="muted">默认折叠，点击节点后可展开查看入边和出边详情。</p>'
+        '</div>'
+    )
+    template = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>__TITLE__</title>
+  <style>
+    body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: linear-gradient(180deg, #f8fafc 0%, #eef4ff 100%); color: #0f172a; }
+    .toolbar { display: flex; gap: 10px; align-items: center; padding: 14px 18px; background: rgba(15, 23, 42, 0.96); color: white; position: sticky; top: 0; z-index: 20; backdrop-filter: blur(10px); box-shadow: 0 8px 20px rgba(15, 23, 42, 0.22); }
+    .toolbar input, .toolbar select, .toolbar button { border-radius: 10px; border: none; padding: 9px 12px; font-size: 14px; }
+    .toolbar input, .toolbar select { background: white; color: #0f172a; min-width: 180px; }
+    .toolbar button { background: #2563eb; color: white; cursor: pointer; box-shadow: 0 6px 14px rgba(37, 99, 235, 0.25); }
+    .toolbar button:hover { background: #1d4ed8; }
+    .layout { height: calc(100vh - 66px); }
+    .graph-stage { position: relative; height: 100%; overflow: hidden; background:
+      radial-gradient(circle at top left, rgba(59,130,246,0.12), transparent 32%),
+      linear-gradient(180deg, rgba(255,255,255,0.9), rgba(239,246,255,0.95)); }
+    #cy { width: 100%; height: 100%; }
+    .legend-card { position: absolute; left: 18px; bottom: 18px; width: 220px; background: rgba(255,255,255,0.95); border: 1px solid #dbe3f0; border-radius: 16px; padding: 14px; box-shadow: 0 14px 30px rgba(15,23,42,0.12); z-index: 10; }
+    .legend-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; color: #0f172a; }
+    .legend-row { display: flex; justify-content: space-between; gap: 10px; padding: 5px 0; font-size: 12px; border-bottom: 1px dashed #e2e8f0; }
+    .legend-row:last-child { border-bottom: none; }
+    .legend-en { font-weight: 700; color: #1d4ed8; }
+    .legend-zh { color: #475569; text-align: right; }
+    .floating-detail-card { position: absolute; min-width: 320px; max-width: 380px; max-height: calc(100% - 48px); overflow: auto; right: auto; top: auto; z-index: 12; background: rgba(255,255,255,0.97); border: 1px solid #dbe3f0; border-radius: 18px; box-shadow: 0 20px 44px rgba(15,23,42,0.18); padding: 14px; backdrop-filter: blur(10px); }
+    .floating-empty { color: #64748b; line-height: 1.5; }
+    .hero-card { border-radius: 18px; padding: 18px; background: linear-gradient(135deg, #1d4ed8, #7c3aed); color: white; box-shadow: 0 18px 34px rgba(37,99,235,0.24); margin-bottom: 14px; }
+    .hero-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+    .hero-subtitle { opacity: 0.92; line-height: 1.5; }
+    .detail-card { border-radius: 16px; background: white; border: 1px solid #e2e8f0; box-shadow: 0 10px 24px rgba(15,23,42,0.06); padding: 14px 16px; margin-bottom: 12px; }
+    .section-title { margin: 0 0 10px 0; font-size: 14px; color: #334155; font-weight: 700; }
+    .type-chip { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 12px; font-weight: 700; margin-right: 8px; }
+    .group-chip { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #f5f3ff; color: #6d28d9; font-size: 12px; font-weight: 600; }
+    .muted { color: #64748b; }
+    .detail-text { margin: 0; line-height: 1.65; }
+    .pill-row { display: flex; gap: 6px; flex-wrap: wrap; }
+    .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #e0e7ff; color: #3730a3; font-size: 12px; font-weight: 600; }
+    .list { margin: 0; padding-left: 18px; }
+    .list li { margin: 6px 0; line-height: 1.45; }
+    .kv-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+    .summary-box { border-radius: 12px; background: #f8fafc; border: 1px solid #e2e8f0; padding: 10px 12px; }
+    .summary-box strong { color: #0f172a; }
+    .actions { margin-top: 12px; }
+    .actions button { background: #e2e8f0; color: #0f172a; border: none; border-radius: 10px; padding: 7px 12px; cursor: pointer; }
+    .hidden { display: none; }
+    .qa-assistant-toggle { position: absolute; right: 20px; bottom: 20px; z-index: 14; border: none; border-radius: 999px; padding: 12px 18px; background: linear-gradient(135deg, #0ea5e9, #7c3aed); color: white; font-weight: 700; cursor: pointer; box-shadow: 0 12px 26px rgba(59,130,246,0.28); }
+    .qa-answer-panel { position: absolute; right: 20px; bottom: 76px; z-index: 14; width: 360px; max-height: calc(100% - 120px); overflow: auto; border-radius: 18px; border: 1px solid rgba(59,130,246,0.24); background: linear-gradient(180deg, rgba(15,23,42,0.94), rgba(30,41,59,0.92)); color: #e2e8f0; box-shadow: 0 20px 48px rgba(15,23,42,0.34); padding: 16px; backdrop-filter: blur(14px); }
+    .qa-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; color: #f8fafc; }
+    .qa-subtitle { font-size: 12px; color: #93c5fd; line-height: 1.5; margin-bottom: 14px; }
+    .qa-input { width: 100%; min-height: 96px; resize: vertical; border-radius: 12px; border: 1px solid rgba(148,163,184,0.35); background: rgba(15,23,42,0.72); color: #e2e8f0; padding: 12px; box-sizing: border-box; }
+    .qa-actions { display: flex; justify-content: flex-end; margin-top: 10px; }
+    .qa-submit { border: none; border-radius: 10px; padding: 8px 14px; background: linear-gradient(135deg, #2563eb, #7c3aed); color: white; font-weight: 700; cursor: pointer; }
+    .qa-card { margin-top: 14px; border-radius: 14px; background: rgba(15,23,42,0.48); border: 1px solid rgba(148,163,184,0.24); padding: 12px; }
+    .qa-card-title { font-size: 13px; font-weight: 700; color: #bfdbfe; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <input id="node-search" type="search" placeholder="搜索实体或指标" />
+    <button id="search-button">定位</button>
+    <select id="relation-filter"></select>
+    <button id="toggle-metrics">展开/收起指标</button>
+    <button id="reset-view">重置视图</button>
+  </div>
+  <div class="layout">
+    <div class="graph-stage">
+      <div id="cy"></div>
+      <div class="legend-card">
+        <div class="legend-title">关系图例</div>
+        __RELATION_LEGEND__
+      </div>
+      <div id="floating-detail-card" class="floating-detail-card hidden">__DEFAULT_PANEL__</div>
+      <button id="qa-assistant-toggle" class="qa-assistant-toggle">智能问答助手</button>
+      <section id="qa-answer-panel" class="qa-answer-panel hidden">
+        <div class="qa-title">智能问答助手</div>
+        <div class="qa-subtitle">仅基于当前本体系统回答</div>
+        <textarea id="qa-question" class="qa-input" placeholder="请输入你想询问的本体问题"></textarea>
+        <div class="qa-actions"><button id="qa-submit" class="qa-submit">提问</button></div>
+        <div id="qa-status" class="qa-card hidden"><div class="qa-card-title">状态</div><div>等待提问</div></div>
+        <div id="qa-answer" class="qa-card hidden"><div class="qa-card-title">答案</div><div>等待回答</div></div>
+        <div id="qa-evidence-chain" class="qa-card hidden"><div class="qa-card-title">证据链</div><div>等待检索</div></div>
+      </section>
+  </div>
+  <script>__CYTOSCAPE_BUNDLE__
+window.cytoscape = window.cytoscape || cytoscape;
+</script>
+  <script>
+    const graphPayload = __PAYLOAD__;
+    const relationFilter = document.getElementById('relation-filter');
+    const floatingDetailCard = document.getElementById('floating-detail-card');
+    const searchInput = document.getElementById('node-search');
+    const searchButton = document.getElementById('search-button');
+    const resetButton = document.getElementById('reset-view');
+    const toggleMetricsButton = document.getElementById('toggle-metrics');
+    const qaAssistantToggle = document.getElementById('qa-assistant-toggle');
+    const qaAnswerPanel = document.getElementById('qa-answer-panel');
+    const qaQuestionInput = document.getElementById('qa-question');
+    const qaSubmitButton = document.getElementById('qa-submit');
+    const qaStatusCard = document.getElementById('qa-status');
+    const qaAnswerCard = document.getElementById('qa-answer');
+    const qaEvidenceChainCard = document.getElementById('qa-evidence-chain');
+    const qaStatusBody = qaStatusCard.querySelector('div:last-child');
+    const qaAnswerBody = qaAnswerCard.querySelector('div:last-child');
+    const qaEvidenceChainBody = qaEvidenceChainCard.querySelector('div:last-child');
+    const defaultPanelHtml = __DEFAULT_PANEL_JSON__;
+    let qaEventSource = null;
+    let persistedEvidenceChain = [];
+    let persistedEvidenceMap = new Map();
+
+    relationFilter.innerHTML = ['<option value="all">全部关系</option>']
+      .concat(graphPayload.relationTypes.map(item => `<option value="${item}">${item}</option>`))
+      .join('');
+
+    const cy = cytoscape({
+      container: document.getElementById('cy'),
+      elements: graphPayload.elements,
+      layout: {
+        name: 'cose',
+        animate: false,
+        randomize: false,
+        fit: false,
+        idealEdgeLength: 180,
+        nodeRepulsion: 420000,
+        edgeElasticity: 120,
+        gravity: 0.25,
+        nestingFactor: 1.1,
+        numIter: 1600,
+        initialTemp: 180,
+        coolingFactor: 0.95
+      },
+      autoungrabify: true,
+      boxSelectionEnabled: false,
+      wheelSensitivity: 0.18,
+      minZoom: 0.35,
+      maxZoom: 2.2,
+      style: [
+        {
+          selector: 'node',
+          style: {
+            'shape': 'round-rectangle',
+            'background-color': 'data(color)',
+            'label': 'data(label)',
+            'text-wrap': 'wrap',
+            'text-max-width': 150,
+            'text-valign': 'center',
+            'text-halign': 'center',
+            'font-size': 11,
+            'font-weight': 600,
+            'color': '#0f172a',
+            'padding': '12px',
+            'width': 'label',
+            'height': 'label',
+            'border-width': 2,
+            'border-color': '#1e293b',
+            'shadow-blur': 18,
+            'shadow-color': 'rgba(15, 23, 42, 0.15)',
+            'shadow-opacity': 1,
+            'shadow-offset-x': 0,
+            'shadow-offset-y': 8
+          }
+        },
+        {
+          selector: 'edge',
+          style: {
+            'curve-style': 'bezier',
+            'target-arrow-shape': 'triangle',
+            'line-color': 'data(edgeColor)',
+            'target-arrow-color': 'data(edgeColor)',
+            'line-style': 'data(lineStyle)',
+            'label': 'data(label)',
+            'font-size': 10,
+            'font-weight': 700,
+            'text-rotation': 'autorotate',
+            'text-background-color': '#ffffff',
+            'text-background-opacity': 0.96,
+            'text-background-padding': 3,
+            'color': '#0f172a',
+            'width': 'data(width)'
+          }
+        },
+        { selector: '.metric-hidden', style: { display: 'none' } },
+        { selector: '.filtered-hidden', style: { display: 'none' } },
+        { selector: '.dimmed', style: { opacity: 0.12 } },
+        { selector: '.highlighted', style: { opacity: 1, 'border-color': '#2563eb', 'border-width': 4 } },
+        { selector: 'edge.highlighted', style: { 'line-color': '#2563eb', 'target-arrow-color': '#2563eb', 'width': 4 } }
+      ]
+    });
+
+    let metricsExpanded = false;
+
+    function formatPropertyLines(values) {
+      if (!Array.isArray(values) || values.length === 0) return '';
+      return `<ul class="list">${values.map(item => {
+        const value = String(item || '').trim();
+        if (!value) return '';
+        const separatorIndex = value.indexOf('\uFF1A');
+        if (separatorIndex === -1) {
+          return `<li><strong>${value}</strong></li>`;
+        }
+        const key = value.slice(0, separatorIndex);
+        const description = value.slice(separatorIndex + 1);
+        return `<li><strong>${key}</strong>\uFF1A${description}</li>`;
+      }).join('')}</ul>`;
+    }
+
+    function formatStringList(values) {
+      if (!Array.isArray(values) || values.length === 0) return '';
+      return `<ul class="list">${values.map(item => {
+        const value = String(item || '').trim();
+        return value ? `<li>${value}</li>` : '';
+      }).join('')}</ul>`;
+    }
+
+    function renderSection(title, bodyHtml, hasContent) {
+      if (!hasContent) return ''; // if (!hasContent) return
+      return `<div class="detail-card"><div class="section-title">${title}</div>${bodyHtml}</div>`;
+    }
+
+    function hasNamedList(values) {
+      return Array.isArray(values) && values.length > 0;
+    }
+
+    function hasStringList(values) {
+      return Array.isArray(values) && values.length > 0;
+    }
+
+    function renderRelations(title, relations) {
+      if (!relations.length) return '';
+      return `<div class="detail-card"><div class="section-title">${title}</div><ul class="list">${relations.map(item => `<li>${item}</li>`).join('')}</ul></div>`;
+    }
+
+    function showInlineDetailCard(node, htmlContent) {
+      floatingDetailCard.innerHTML = htmlContent;
+      floatingDetailCard.classList.remove('hidden');
+      floatingDetailCard.style.visibility = 'hidden';
+      const graphStage = document.querySelector('.graph-stage');
+      const stageRect = graphStage.getBoundingClientRect();
+      const cardRect = floatingDetailCard.getBoundingClientRect();
+      const nodePos = node.renderedPosition();
+      let left = nodePos.x + 28;
+      let top = nodePos.y - cardRect.height / 2;
+      if (left + cardRect.width > stageRect.width - 12) {
+        left = nodePos.x - cardRect.width - 28;
+      }
+      if (left < 12) left = 12;
+      if (top < 12) top = 12;
+      if (top + cardRect.height > stageRect.height - 12) {
+        top = stageRect.height - cardRect.height - 12;
+      }
+      floatingDetailCard.style.left = `${left}px`;
+      floatingDetailCard.style.top = `${top}px`;
+      floatingDetailCard.style.visibility = 'visible';
+    }
+
+    function hideInlineDetailCard() {
+      floatingDetailCard.classList.add('hidden');
+      floatingDetailCard.innerHTML = defaultPanelHtml;
+    }
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function setQaStatus(message) {
+      qaStatusCard.classList.remove('hidden');
+      qaStatusBody.textContent = message || '等待提问';
+    }
+
+    function setQaAnswer(message) {
+      qaAnswerCard.classList.remove('hidden');
+      qaAnswerBody.innerHTML = escapeHtml(message || '');
+    }
+
+    function clearQaPresentation() {
+      setQaStatus('\u7b49\u5f85\u63d0\u95ee');
+      qaAnswerCard.classList.add('hidden');
+      qaAnswerBody.textContent = '\u7b49\u5f85\u56de\u7b54';
+      qaEvidenceChainCard.classList.add('hidden');
+      qaEvidenceChainBody.innerHTML = '\u7b49\u5f85\u68c0\u7d22';
+      persistedEvidenceChain = [];
+      persistedEvidenceMap = new Map();
+    }
+
+    function buildFocusCollection(nodeIds, edgeIds) {
+      let collection = cy.collection();
+      (nodeIds || []).forEach(id => {
+        const node = cy.getElementById(id);
+        if (node && node.length) collection = collection.union(node);
+      });
+      (edgeIds || []).forEach(id => {
+        const edge = cy.getElementById(id);
+        if (edge && edge.length) collection = collection.union(edge);
+      });
+      return collection;
+    }
+
+    function replayEvidenceFocus(evidenceId) {
+      const item = persistedEvidenceMap.get(evidenceId);
+      if (!item) return;
+      focusEvidence(item.node_ids || [], item.edge_ids || []);
+      setQaStatus(`回放证据 ${evidenceId}`);
+    }
+
+    function renderEvidenceChain(chain) {
+      qaEvidenceChainCard.classList.remove('hidden');
+      if (!Array.isArray(chain) || chain.length === 0) {
+        qaEvidenceChainBody.innerHTML = '<div class="muted">\u6682\u65e0\u8bc1\u636e</div>';
+        return;
+      }
+      qaEvidenceChainBody.innerHTML = chain.map(item => {
+        const reasons = Array.isArray(item.why_matched) && item.why_matched.length
+          ? `<div style="margin-top:6px;color:#93c5fd;font-size:12px;">${item.why_matched.map(reason => escapeHtml(reason)).join('?')}</div>`
+          : '';
+        return `
+          <button type="button" data-evidence-id="${escapeHtml(item.evidence_id)}" style="display:block;width:100%;text-align:left;background:rgba(30,41,59,0.9);border:1px solid rgba(148,163,184,0.28);border-radius:12px;color:#e2e8f0;padding:10px 12px;margin:0 0 10px 0;cursor:pointer;">
+            <div style="font-weight:700;color:#bfdbfe;">[${escapeHtml(item.evidence_id)}] ${escapeHtml(item.label || item.kind || '证据')}</div>
+            <div style="margin-top:4px;line-height:1.5;">${escapeHtml(item.message || '')}</div>
+            ${reasons}
+          </button>
+        `;
+      }).join('');
+      qaEvidenceChainBody.querySelectorAll('[data-evidence-id]').forEach(button => {
+        button.addEventListener('click', () => replayEvidenceFocus(button.dataset.evidenceId));
+      });
+    }
+
+    function appendEvidenceIncrementally(evidence) {
+      if (!evidence || !evidence.evidence_id) return;
+      persistedEvidenceMap.set(evidence.evidence_id, evidence);
+      persistedEvidenceChain = Array.from(persistedEvidenceMap.values());
+      renderEvidenceChain(persistedEvidenceChain);
+    }
+
+    function persistFinalEvidence(result) {
+      persistedEvidenceChain = Array.isArray(result.evidence_chain) ? result.evidence_chain : [];
+      persistedEvidenceMap = new Map(persistedEvidenceChain.map(item => [item.evidence_id, item]));
+      renderEvidenceChain(persistedEvidenceChain);
+    }
+
+    function playRetrievalEvent(eventType, payload) {
+      const nodeIds = Array.isArray(payload.node_ids) ? payload.node_ids : [];
+      const edgeIds = Array.isArray(payload.edge_ids) ? payload.edge_ids : [];
+      if (payload.message) {
+        setQaStatus(payload.message);
+      }
+      if (['anchor_node', 'expand_neighbors', 'filter_nodes', 'focus_subgraph'].includes(eventType)) {
+        focusEvidence(nodeIds, edgeIds);
+        return;
+      }
+      if (eventType === 'evidence' && payload.evidence) {
+        appendEvidenceIncrementally(payload.evidence);
+        focusEvidence(nodeIds, edgeIds);
+        return;
+      }
+      if (eventType === 'answer_done') {
+        persistFinalEvidence(payload);
+        setQaAnswer(payload.answer || '');
+      }
+    }
+
+    function startQaStream(question) {
+      const trimmedQuestion = String(question || '').trim();
+      if (!trimmedQuestion) return;
+      qaAnswerPanel.classList.remove('hidden');
+      if (qaEventSource) {
+        qaEventSource.close();
+        qaEventSource = null;
+      }
+      clearQaPresentation();
+      setQaStatus('\u6b63\u5728\u68c0\u7d22\u672c\u4f53\u8bc1\u636e...');
+      const eventSource = new EventSource(`/api/qa/stream?q=${encodeURIComponent(trimmedQuestion)}`);
+      qaEventSource = eventSource;
+      ['anchor_node', 'expand_neighbors', 'filter_nodes', 'focus_subgraph', 'evidence', 'answer_done'].forEach(eventType => {
+        eventSource.addEventListener(eventType, event => {
+          const payload = JSON.parse(event.data);
+          playRetrievalEvent(eventType, payload);
+          if (eventType === 'answer_done') {
+            eventSource.close();
+            if (qaEventSource === eventSource) {
+              qaEventSource = null;
+            }
+          }
+        });
+      });
+      eventSource.addEventListener('error', () => {
+        setQaStatus('\u95ee\u7b54\u6d41\u5df2\u4e2d\u65ad');
+        eventSource.close();
+        if (qaEventSource === eventSource) {
+          qaEventSource = null;
+        }
+      });
+    }
+
+    function visibleBusinessEdgesFor(nodeId, direction) {
+      return cy.edges().filter(edge => {
+        if (edge.data('synthetic')) return false;
+        if (edge.style('display') === 'none') return false;
+        return direction === 'in' ? edge.target().id() === nodeId : edge.source().id() === nodeId;
+      });
+    }
+
+    function relationLinesFor(nodeId, direction) {
+      return visibleBusinessEdgesFor(nodeId, direction).map(edge => {
+        const src = edge.source().data('display_name');
+        const dst = edge.target().data('display_name');
+        return `${src} ${edge.data('relation')} ${dst}`;
+      });
+    }
+
+    function renderNodeDetails(node) {
+      const data = node.data();
+      const attrs = data.attributes || {};
+      const inRelations = relationLinesFor(node.id(), 'in');
+      const outRelations = relationLinesFor(node.id(), 'out');
+      const relationTypes = [...new Set(
+        cy.edges().filter(edge => !edge.data('synthetic') && (edge.source().id() === node.id() || edge.target().id() === node.id()))
+          .map(edge => edge.data('relation'))
+      )].sort();
+      const hasRelationSummary = relationTypes.length > 0 || inRelations.length > 0 || outRelations.length > 0;
+      const relationSummaryHtml = hasRelationSummary
+        ? `<div class="detail-card"><div class="section-title">关系摘要</div><div class="summary-box"><strong>入边：</strong>${inRelations.length} &nbsp; <strong>出边：</strong>${outRelations.length}</div><div style="height:8px"></div><div class="pill-row">${relationTypes.length ? relationTypes.map(item => `<span class="pill">${item}</span>`).join('') : '<span class=\"muted\">\u65e0</span>'}</div><div class="actions"><button id="toggle-relations">展开关系明细</button></div></div><div id="relation-details" class="hidden">${renderRelations('入边明细', inRelations)}${renderRelations('出边明细', outRelations)}</div>`
+        : '';
+      const htmlContent = `
+        <div class="hero-card">
+          <div class="hero-title">${data.display_name}</div>
+          <div class="hero-subtitle">
+            <span class="type-chip">${data.type}</span>
+            <span class="group-chip">${attrs.display_group || '未分组'}</span>
+          </div>
+        </div>
+        ${renderSection('\u4e2d\u6587\u91ca\u4e49', `<p class=\"detail-text\">${attrs.chinese_description || attrs.description}</p>`, Boolean(attrs.chinese_description || attrs.description))}
+        ${renderSection('\u8bed\u4e49\u5b9a\u4e49', `<p class=\"detail-text\">${attrs.semantic_definition}</p>`, Boolean(attrs.semantic_definition))}
+        ${renderSection('关键属性', formatPropertyLines(attrs.key_property_lines || []), hasStringList(attrs.key_property_lines))}
+        ${renderSection('状态建议', formatPropertyLines(attrs.status_value_lines || []), hasStringList(attrs.status_value_lines))}
+        ${renderSection('规则约束', formatStringList(attrs.rule_lines || attrs.rules || []), hasStringList(attrs.rule_lines || attrs.rules))}
+        ${renderSection('说明', formatStringList(attrs.note_lines || attrs.notes || []), hasStringList(attrs.note_lines || attrs.notes))}
+        ${relationSummaryHtml}
+      `;
+      showInlineDetailCard(node, htmlContent);
+      const button = document.getElementById('toggle-relations');
+      if (button) {
+        button.addEventListener('click', () => {
+          const details = document.getElementById('relation-details');
+          details.classList.toggle('hidden');
+          button.textContent = details.classList.contains('hidden') ? '展开关系明细' : '收起关系明细';
+        });
+      }
+    }
+
+    function renderMetricGroupDetails(node) {
+      const attrs = node.data('attributes') || {};
+      const htmlContent = `
+        <div class="hero-card">
+          <div class="hero-title">关键派生指标</div>
+          <div class="hero-subtitle">点击图中该节点可原地展开/收起详细指标。</div>
+        </div>
+        ${renderSection('\u8bf4\u660e', `<p class=\"detail-text\">${attrs.description}</p>`, Boolean(attrs.description))}
+        ${renderSection('指标列表', formatStringList(attrs.metric_names || []), hasStringList(attrs.metric_names))}
+      `;
+      showInlineDetailCard(node, htmlContent);
+    }
+
+    function toggleMetricNodes(forceState) {
+      metricsExpanded = typeof forceState === 'boolean' ? forceState : !metricsExpanded;
+      graphPayload.metricNodeIds.forEach(id => {
+        const node = cy.getElementById(id);
+        if (node) node.style('display', metricsExpanded ? 'element' : 'none');
+      });
+      graphPayload.metricEdgeIds.forEach(id => {
+        const edge = cy.getElementById(id);
+        if (edge) edge.style('display', metricsExpanded ? 'element' : 'none');
+      });
+    }
+
+    function applyRelationFilter() {
+      const relation = relationFilter.value;
+      cy.edges().forEach(edge => {
+        if (edge.data('synthetic')) {
+          edge.style('display', metricsExpanded ? 'element' : 'none');
+          return;
+        }
+        const visible = relation === 'all' || edge.data('relation') === relation;
+        edge.style('display', visible ? 'element' : 'none');
+      });
+
+      cy.nodes().forEach(node => {
+        if (node.id() === graphPayload.metricGroupId) {
+          node.style('display', 'element');
+          return;
+        }
+        if (graphPayload.metricNodeIds.includes(node.id())) {
+          node.style('display', metricsExpanded ? 'element' : 'none');
+          return;
+        }
+        const connectedVisible = node.connectedEdges().some(edge => !edge.data('synthetic') && edge.style('display') !== 'none');
+        node.style('display', relation === 'all' || connectedVisible ? 'element' : 'none');
+      });
+    }
+
+    function highlightNode(node) {
+      cy.elements().removeClass('highlighted');
+      cy.elements().removeClass('dimmed');
+      const neighborhood = node.closedNeighborhood();
+      cy.elements(':visible').addClass('dimmed');
+      neighborhood.removeClass('dimmed');
+      neighborhood.addClass('highlighted');
+      cy.fit(neighborhood, 90);
+    }
+
+    cy.on('tap', 'node', event => {
+      const node = event.target;
+      if (node.id() === graphPayload.metricGroupId) {
+        toggleMetricNodes();
+        applyRelationFilter();
+        highlightNode(node);
+        renderMetricGroupDetails(node);
+        return;
+      }
+      highlightNode(node);
+      renderNodeDetails(node);
+    });
+
+    cy.on('tap', event => {
+      if (event.target === cy) {
+        cy.elements().removeClass('highlighted');
+        cy.elements().removeClass('dimmed');
+        hideInlineDetailCard();
+      }
+    });
+
+    relationFilter.addEventListener('change', () => {
+      applyRelationFilter();
+      cy.fit(cy.elements(':visible'), 70);
+    });
+
+    searchButton.addEventListener('click', () => {
+      const query = searchInput.value.trim().toLowerCase();
+      if (!query) return;
+      const match = cy.nodes().find(node => (node.data('search_text') || '').includes(query));
+      if (match) {
+        if (graphPayload.metricNodeIds.includes(match.id())) {
+          toggleMetricNodes(true);
+          applyRelationFilter();
+        }
+        highlightNode(match);
+        if (match.id() === graphPayload.metricGroupId) {
+          renderMetricGroupDetails(match);
+        } else {
+          renderNodeDetails(match);
+        }
+      }
+    });
+
+    toggleMetricsButton.addEventListener('click', () => {
+      toggleMetricNodes();
+      applyRelationFilter();
+      cy.fit(cy.elements(':visible'), 70);
+    });
+
+    resetButton.addEventListener('click', () => {
+      relationFilter.value = 'all';
+      searchInput.value = '';
+      cy.elements().removeClass('highlighted');
+      cy.elements().removeClass('dimmed');
+      if (qaEventSource) {
+        qaEventSource.close();
+        qaEventSource = null;
+      }
+      toggleMetricNodes(false);
+      applyRelationFilter();
+      hideInlineDetailCard();
+      cy.fit(cy.elements(':visible'), 70);
+    });
+
+    qaAssistantToggle.addEventListener('click', () => {
+      qaAnswerPanel.classList.toggle('hidden');
+    });
+
+    qaSubmitButton.addEventListener('click', () => {
+      startQaStream(qaQuestionInput.value);
+    });
+
+    qaQuestionInput.addEventListener('keydown', event => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        startQaStream(qaQuestionInput.value);
+      }
+    });
+
+    cy.ready(() => {
+      toggleMetricNodes(false);
+      applyRelationFilter();
+      clearQaPresentation();
+      cy.fit(cy.elements(':visible'), 70);
+    });
+  </script>
+</body>
+</html>"""
+    return (
+        template
+        .replace('__TITLE__', html.escape(title))
+        .replace('__RELATION_LEGEND__', relation_legend_html)
+        .replace('__DEFAULT_PANEL__', default_panel_html)
+        .replace('__DEFAULT_PANEL_JSON__', json.dumps(default_panel_html, ensure_ascii=False))
+        .replace('__PAYLOAD__', payload_json)
+        .replace('__CYTOSCAPE_BUNDLE__', cytoscape_bundle)
+    )
+
+
+
+def export_interactive_graph_html(graph: OntologyGraph, output_html_path: str | Path, title: str = 'Interactive Ontology Graph') -> Path:
+    output_path = Path(output_html_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(build_interactive_graph_html(graph, title=title), encoding='utf-8')
+    return output_path
+
+
+
+def export_graph_pdf(graph: OntologyGraph, output_pdf_path: str | Path, title: str = 'Ontology Definition Graph') -> Path:
+    output_path = Path(output_pdf_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    html_text = build_interactive_graph_html(graph, title=title)
+    browser = _find_browser_executable()
+    with TemporaryDirectory() as temp_dir:
+        html_path = Path(temp_dir) / 'ontology_definition_graph.html'
+        html_path.write_text(html_text, encoding='utf-8')
+        subprocess.run(
+            [
+                str(browser),
+                '--headless=new',
+                '--disable-gpu',
+                '--run-all-compositor-stages-before-draw',
+                '--virtual-time-budget=20000',
+                f'--print-to-pdf={output_path}',
+                html_path.as_uri(),
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    return output_path
+
+
+
+def _find_browser_executable() -> Path:
+    for candidate in BROWSER_CANDIDATES:
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError('No supported browser executable found for PDF export.')
+
+
+
+def build_graph_payload(graph: OntologyGraph) -> dict[str, object]:
+    mainline_order = _flatten_mainline(graph.metadata.get('mainline', []))
+    objects = [obj for obj in graph.objects.values() if obj.type != 'DerivedMetric']
+    metric_nodes = [obj for obj in graph.objects.values() if obj.type == 'DerivedMetric']
+    positions = _build_positions(objects, metric_nodes, mainline_order, graph.relations)
+
+    relation_types = list(dict.fromkeys(relation.relation for relation in graph.relations))
+    relation_legend = [
+        {'relation': relation, 'translation': RELATION_TRANSLATIONS.get(relation, '未翻译')}
+        for relation in relation_types
+    ]
+
+    elements: list[dict[str, object]] = []
+    metric_node_ids: list[str] = []
+    metric_edge_ids: list[str] = []
+
+    for obj in objects:
+        attrs = dict(obj.attributes)
+        raw_group = attrs.get('group', '')
+        display_group = _strip_group_prefix(raw_group) or '未分组'
+        attrs['display_group'] = display_group
+        attrs['key_property_lines'] = _named_items_to_lines(attrs.get('key_properties'))
+        attrs['status_value_lines'] = _named_items_to_lines(attrs.get('status_values'))
+        attrs['rule_lines'] = _string_items_to_lines(attrs.get('rules'))
+        attrs['note_lines'] = _string_items_to_lines(attrs.get('notes'))
+        elements.append(
+            {
+                'data': {
+                    'id': obj.id,
+                    'label': f"{obj.name}\n{display_group}",
+                    'display_name': obj.name,
+                    'type': obj.type,
+                    'attributes': attrs,
+                    'color': _color_for_group(display_group, obj.type),
+                    'search_text': f"{obj.name} {display_group} {raw_group} {json.dumps(attrs, ensure_ascii=False)}".lower(),
+                },
+                'position': positions[obj.id],
+            }
+        )
+
+    if metric_nodes:
+        metric_names = [metric.name for metric in metric_nodes]
+        elements.append(
+            {
+                'data': {
+                    'id': METRIC_GROUP_ID,
+                    'label': '关键派生指标',
+                    'display_name': '关键派生指标',
+                    'type': 'MetricGroup',
+                    'attributes': {
+                        'display_group': '关键派生指标',
+                        'description': '点击图中该节点可原地展开或收起详细指标。',
+                        'metric_names': metric_names,
+                    },
+                    'color': DEFAULT_TYPE_COLORS['MetricGroup'],
+                    'search_text': ('关键派生指标 ' + ' '.join(metric_names)).lower(),
+                },
+                'position': positions[METRIC_GROUP_ID],
+            }
+        )
+        for index, metric in enumerate(metric_nodes, start=1):
+            attrs = dict(metric.attributes)
+            attrs['display_group'] = '关键派生指标'
+            attrs['rule_lines'] = _string_items_to_lines(attrs.get('rules'))
+            attrs['note_lines'] = _string_items_to_lines(attrs.get('notes'))
+            metric_node_ids.append(metric.id)
+            elements.append(
+                {
+                    'data': {
+                        'id': metric.id,
+                        'label': metric.name,
+                        'display_name': metric.name,
+                        'type': metric.type,
+                        'attributes': attrs,
+                        'color': DEFAULT_TYPE_COLORS['DerivedMetric'],
+                        'search_text': f"{metric.name} 关键派生指标 {json.dumps(attrs, ensure_ascii=False)}".lower(),
+                    },
+                    'classes': 'metric-hidden',
+                    'position': positions[metric.id],
+                }
+            )
+            metric_edge_id = f'metric_edge:{index}'
+            metric_edge_ids.append(metric_edge_id)
+            elements.append(
+                {
+                    'data': {
+                        'id': metric_edge_id,
+                        'source': METRIC_GROUP_ID,
+                        'target': metric.id,
+                        'label': '',
+                        'relation': '__METRIC__',
+                        'synthetic': True,
+                        'edgeColor': '#c4b5fd',
+                        'lineStyle': 'dashed',
+                        'width': 2,
+                    },
+                    'classes': 'metric-hidden',
+                }
+            )
+
+    for index, relation in enumerate(graph.relations, start=1):
+        elements.append(
+            {
+                'data': {
+                    'id': f'e{index}',
+                    'source': relation.source_id,
+                    'target': relation.target_id,
+                    'label': relation.relation,
+                    'relation': relation.relation,
+                    'attributes': dict(relation.attributes),
+                    'synthetic': False,
+                    'edgeColor': '#94a3b8',
+                    'lineStyle': 'solid',
+                    'width': 3,
+                }
+            }
+        )
+
+    return {
+        'elements': elements,
+        'relationTypes': relation_types,
+        'relationLegend': relation_legend,
+        'metricGroupId': METRIC_GROUP_ID,
+        'metricNodeIds': metric_node_ids,
+        'metricEdgeIds': metric_edge_ids,
+    }
+
+
+
+def _build_positions(objects: list, metric_nodes: list, mainline_order: list[str], relations: list) -> dict[str, dict[str, float]]:
+    grouped: dict[str, list] = {}
+    group_order = ['项目与目标层', '空间层', '设备与物流层', '活动与排期层', '施工执行层', '决策与解释层']
+    for obj in objects:
+        display_group = _strip_group_prefix(obj.attributes.get('group', '')) or '未分组'
+        grouped.setdefault(display_group, []).append(obj)
+
+    ordered_groups = [name for name in group_order if name in grouped]
+    ordered_groups.extend(sorted(name for name in grouped if name not in ordered_groups))
+
+    mainline_rank = {name: index for index, name in enumerate(mainline_order)}
+    positions: dict[str, dict[str, float]] = {}
+    start_x = 180.0
+    lane_gap = 330.0
+    center_y = 320.0
+    node_gap_y = 150.0
+
+    for group_index, group_name in enumerate(ordered_groups):
+        items = grouped[group_name]
+        items.sort(key=lambda obj: (0 if obj.name in mainline_rank else 1, mainline_rank.get(obj.name, 999), obj.name))
+        offsets = _symmetric_offsets(len(items), node_gap_y)
+        x = start_x + group_index * lane_gap
+        for obj, offset in zip(items, offsets):
+            positions[obj.id] = {'x': x, 'y': center_y + offset}
+
+    if metric_nodes:
+        metric_group_x = start_x + max(len(ordered_groups), 1) * lane_gap
+        metric_group_y = center_y
+        positions[METRIC_GROUP_ID] = {'x': metric_group_x, 'y': metric_group_y}
+        for index, metric in enumerate(metric_nodes):
+            row = index // 2
+            col = index % 2
+            x = metric_group_x + (-110 if col == 0 else 110)
+            y = metric_group_y + 130 + row * 110
+            positions[metric.id] = {'x': x, 'y': y}
+
+    return positions
+
+
+def _guess_anchor_id(obj, objects_by_name: dict[str, object], fallback_mainline: str) -> str:
+    display_group = _strip_group_prefix(obj.attributes.get('group', ''))
+    preferred_names = {
+        '项目与目标层': ['Project'],
+        '空间层': ['Room', 'PoDPosition', 'Building'],
+        '设备与物流层': ['PoD', 'Building'],
+        '活动与排期层': ['ActivityInstance', 'PoD'],
+        '施工执行层': ['ActivityInstance', 'PoD'],
+        '决策与解释层': ['PoD', 'ActivityInstance'],
+    }.get(display_group, [])
+    for name in preferred_names:
+        candidate = objects_by_name.get(name)
+        if candidate is not None:
+            return candidate.id
+    return fallback_mainline
+
+
+def _balanced_angle_offsets(count: int, spread: float) -> list[float]:
+    if count <= 0:
+        return []
+    if count == 1:
+        return [0.0]
+    if count == 2:
+        return [-0.35, 0.35]
+    step = spread / max(count - 1, 1)
+    start = -spread / 2
+    return [start + index * step for index in range(count)]
+
+
+def _flatten_mainline(raw_mainline: list[str]) -> list[str]:
+    names: list[str] = []
+    for item in raw_mainline:
+        parts = [part.strip() for part in re.split(r'/', item) if part.strip() and part.strip() != '---']
+        names.extend(parts)
+    return names
+
+
+def _symmetric_offsets(count: int, gap: float) -> list[float]:
+    if count <= 0:
+        return []
+    offsets = [0.0]
+    for index in range(1, count):
+        step = ((index + 1) // 2) * gap
+        offsets.append(-step if index % 2 == 1 else step)
+    return offsets
+
+
+def _strip_group_prefix(group: str) -> str:
+    return re.sub(r'^\d+(?:\.\d+)?\s*', '', group or '').strip()
+
+
+
+def _named_items_to_lines(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    lines: list[str] = []
+    for item in values:
+        if isinstance(item, dict):
+            name = str(item.get('name', '') or '').strip()
+            description = str(item.get('description', '') or '').strip()
+            if name and description:
+                lines.append(f'{name}：{description}')
+            elif name:
+                lines.append(name)
+            elif description:
+                lines.append(description)
+            continue
+        value = str(item or '').strip()
+        if value:
+            lines.append(value)
+    return lines
+
+
+
+def _string_items_to_lines(values: object) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [value for value in (str(item or '').strip() for item in values) if value]
+
+
+
+def _color_for_group(display_group: str, node_type: str) -> str:
+    palette = {
+        '项目与目标层': '#f59e0b',
+        '空间层': '#0ea5e9',
+        '设备与物流层': '#14b8a6',
+        '活动与排期层': '#6366f1',
+        '施工执行层': '#10b981',
+        '决策与解释层': '#ef4444',
+        '关键派生指标': '#7c3aed',
+    }
+    return palette.get(display_group, DEFAULT_TYPE_COLORS.get(node_type, '#475569'))

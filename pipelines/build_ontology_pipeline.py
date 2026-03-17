@@ -1,0 +1,29 @@
+﻿from __future__ import annotations
+
+from pathlib import Path
+
+from cloud_delivery_ontology_palantir.graph_export import export_graph_pdf, export_interactive_graph_html
+from cloud_delivery_ontology_palantir.ontology.definition_graph_builder import build_definition_graph
+from cloud_delivery_ontology_palantir.ontology.definition_markdown_parser import parse_definition_markdown
+from cloud_delivery_ontology_palantir.ontology.definition_writer import write_definition_outputs
+
+
+
+def build_ontology_from_markdown(
+    input_file: str | Path,
+    output_dir: str | Path,
+    *,
+    generate_html: bool = True,
+    generate_pdf: bool = False,
+) -> dict[str, object]:
+    input_path = Path(input_file)
+    output_path = Path(output_dir)
+    text = input_path.read_text(encoding='utf-8')
+    spec = parse_definition_markdown(text, source_file=str(input_path))
+    graph = build_definition_graph(spec)
+    paths = write_definition_outputs(output_path, graph)
+    if generate_html:
+        paths['ontology_html'] = export_interactive_graph_html(graph, output_path / 'ontology.html', title=graph.metadata.get('title', 'Ontology Graph'))
+    if generate_pdf:
+        paths['ontology_pdf'] = export_graph_pdf(graph, output_path / 'ontology.pdf', title=graph.metadata.get('title', 'Ontology Graph'))
+    return {'graph': graph, **paths}

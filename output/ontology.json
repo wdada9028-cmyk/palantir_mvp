@@ -1,0 +1,4998 @@
+{
+  "metadata": {
+    "graph_kind": "ontology_definition_graph",
+    "title": "本体建模 v2",
+    "source_file": "D:\\学习资料\\AI应用使能组\\本体检索代码\\palantir_mvp\\[本体建模] 围绕美团2个核心决策v2.md",
+    "boundaries": [
+      "`PoD`：核心业务对象",
+      "暂时不展开 PoD 内部机柜，只在未来存在按柜活动时再下钻",
+      "一个 `PoD` 对应一个 `PoDPosition`",
+      "`PoDPosition` 的表达方式采用类似 `A机房-01位`",
+      "里程碑分成两类：",
+      "`RoomMilestone`：机房里程碑",
+      "`FloorMilestone`：楼层里程碑",
+      "`RoomMilestone` 的完成标准是：该机房要求数量的 `PoD` 在里程碑时间前完成 `移交`",
+      "`FloorMilestone` 的完成标准是：该楼层下若干机房全部完成移交",
+      "`移交` 是明确的二级活动节点，可作为倒排锚点",
+      "一级活动用于分类分组，真正实例化与排期的是二级活动",
+      "活动排期分两层：",
+      "`PoD` 内部活动排期",
+      "施工队执行分配排期",
+      "一个 `PoD` 到货后即可独立安装，第一版不区分到货时间和可安装时间",
+      "施工队能力采用固定规则，不做复杂资源优化",
+      "第一版不照搬原始设备颗粒度到货模型，而是以 `PoD` 为业务抽象粒度"
+    ],
+    "mainline": [
+      "Project",
+      "Building",
+      "Floor",
+      "Room",
+      "PoDPosition",
+      "PoD",
+      "ActivityInstance",
+      "RoomMilestone / FloorMilestone",
+      "ArrivalPlan / PlacementPlan / WorkAssignment / ConstraintViolation"
+    ],
+    "optional_properties": [
+      {
+        "name": "customer_name",
+        "description": "客户名称",
+        "line_no": 404
+      },
+      {
+        "name": "planned_handover_date",
+        "description": "计划移交日期",
+        "line_no": 405
+      },
+      {
+        "name": "milestone_name",
+        "description": "里程碑名称",
+        "line_no": 406
+      },
+      {
+        "name": "building_code",
+        "description": "大楼编码",
+        "line_no": 407
+      },
+      {
+        "name": "floor_name",
+        "description": "楼层名称",
+        "line_no": 408
+      },
+      {
+        "name": "room_name",
+        "description": "机房名称",
+        "line_no": 409
+      },
+      {
+        "name": "room_code",
+        "description": "机房编码",
+        "line_no": 410
+      },
+      {
+        "name": "position_name",
+        "description": "落位名称",
+        "line_no": 411
+      },
+      {
+        "name": "crew_name",
+        "description": "施工队名称",
+        "line_no": 412
+      },
+      {
+        "name": "reason_summary",
+        "description": "原因摘要",
+        "line_no": 413
+      }
+    ],
+    "optional_property_notes": [
+      "`position_code` 目前保留，因为像 `A机房-01位` 这样的编码本身就承载了位置决策语义",
+      "`building_name` 保留，是为了让“到哪个楼”的建议可直接读懂",
+      "`project_name` 保留，是为了跨项目查看时仍有基本可识别性"
+    ],
+    "counts": {
+      "object_type_count": 21,
+      "derived_metric_count": 18,
+      "relation_count": 38,
+      "total_node_count": 39
+    }
+  },
+  "objects": [
+    {
+      "id": "object_type:Project",
+      "type": "ObjectType",
+      "name": "Project",
+      "aliases": [],
+      "attributes": {
+        "group": "4.1 项目与目标层",
+        "chinese_description": "项目。表示一个面向客户的交付项目，是所有对象的业务聚合根。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "project_id",
+            "description": "项目ID",
+            "line_no": 69
+          },
+          {
+            "name": "project_name",
+            "description": "项目名称",
+            "line_no": 70
+          },
+          {
+            "name": "project_status",
+            "description": "项目状态",
+            "line_no": 71
+          },
+          {
+            "name": "product_type",
+            "description": "产品形态",
+            "line_no": 72
+          },
+          {
+            "name": "cooling_mode",
+            "description": "冷却方式",
+            "line_no": 73
+          },
+          {
+            "name": "project_scene",
+            "description": "项目场景",
+            "line_no": 74
+          },
+          {
+            "name": "planned_start_date",
+            "description": "计划开始日期",
+            "line_no": 75
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 64,
+          "end": 76
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:RoomMilestone",
+      "type": "ObjectType",
+      "name": "RoomMilestone",
+      "aliases": [],
+      "attributes": {
+        "group": "4.1 项目与目标层",
+        "chinese_description": "机房里程碑。表示机房级里程碑约束。",
+        "semantic_definition": "",
+        "key_properties": [
+          {
+            "name": "room_milestone_id",
+            "description": "机房里程碑ID",
+            "line_no": 85
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 86
+          },
+          {
+            "name": "room_id",
+            "description": "目标机房ID",
+            "line_no": 87
+          },
+          {
+            "name": "proposed_by",
+            "description": "提出方",
+            "line_no": 88
+          },
+          {
+            "name": "target_pod_count",
+            "description": "目标PoD数量",
+            "line_no": 89
+          },
+          {
+            "name": "completion_event_code",
+            "description": "完成事件编码",
+            "line_no": 90
+          },
+          {
+            "name": "completion_event_name",
+            "description": "完成事件名称",
+            "line_no": 91
+          },
+          {
+            "name": "due_time",
+            "description": "截止时间",
+            "line_no": 92
+          },
+          {
+            "name": "priority",
+            "description": "优先级",
+            "line_no": 93
+          },
+          {
+            "name": "status",
+            "description": "状态",
+            "line_no": 94
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [
+          "`completion_event_name` 第一版固定为 `移交`"
+        ],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 77,
+          "end": 98
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:FloorMilestone",
+      "type": "ObjectType",
+      "name": "FloorMilestone",
+      "aliases": [],
+      "attributes": {
+        "group": "4.1 项目与目标层",
+        "chinese_description": "楼层里程碑。表示楼层级里程碑约束。",
+        "semantic_definition": "",
+        "key_properties": [
+          {
+            "name": "floor_milestone_id",
+            "description": "楼层里程碑ID",
+            "line_no": 107
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 108
+          },
+          {
+            "name": "floor_id",
+            "description": "目标楼层ID",
+            "line_no": 109
+          },
+          {
+            "name": "proposed_by",
+            "description": "提出方",
+            "line_no": 110
+          },
+          {
+            "name": "due_time",
+            "description": "截止时间",
+            "line_no": 111
+          },
+          {
+            "name": "required_room_count",
+            "description": "要求完成的机房数量",
+            "line_no": 112
+          },
+          {
+            "name": "completed_room_count",
+            "description": "已完成的机房数量",
+            "line_no": 113
+          },
+          {
+            "name": "status",
+            "description": "状态",
+            "line_no": 114
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 99,
+          "end": 115
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:Building",
+      "type": "ObjectType",
+      "name": "Building",
+      "aliases": [],
+      "attributes": {
+        "group": "4.2 空间层",
+        "chinese_description": "大楼。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "building_id",
+            "description": "大楼ID",
+            "line_no": 123
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 124
+          },
+          {
+            "name": "building_name",
+            "description": "大楼名称",
+            "line_no": 125
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 118,
+          "end": 126
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:Floor",
+      "type": "ObjectType",
+      "name": "Floor",
+      "aliases": [],
+      "attributes": {
+        "group": "4.2 空间层",
+        "chinese_description": "楼层。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "floor_id",
+            "description": "楼层ID",
+            "line_no": 132
+          },
+          {
+            "name": "building_id",
+            "description": "所属大楼ID",
+            "line_no": 133
+          },
+          {
+            "name": "floor_no",
+            "description": "楼层编号",
+            "line_no": 134
+          },
+          {
+            "name": "install_sequence",
+            "description": "安装顺序",
+            "line_no": 135
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 127,
+          "end": 136
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:Room",
+      "type": "ObjectType",
+      "name": "Room",
+      "aliases": [],
+      "attributes": {
+        "group": "4.2 空间层",
+        "chinese_description": "机房。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "room_id",
+            "description": "机房ID",
+            "line_no": 142
+          },
+          {
+            "name": "floor_id",
+            "description": "所属楼层ID",
+            "line_no": 143
+          },
+          {
+            "name": "room_type",
+            "description": "机房类型",
+            "line_no": 144
+          },
+          {
+            "name": "max_pod_capacity",
+            "description": "最大PoD容量",
+            "line_no": 145
+          },
+          {
+            "name": "required_handover_pod_count",
+            "description": "要求移交的PoD数量",
+            "line_no": 146
+          },
+          {
+            "name": "room_status",
+            "description": "机房状态",
+            "line_no": 147
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 137,
+          "end": 148
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:PoDPosition",
+      "type": "ObjectType",
+      "name": "PoDPosition",
+      "aliases": [],
+      "attributes": {
+        "group": "4.2 空间层",
+        "chinese_description": "PoD落位。表示机房内的 PoD 安装落位。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "position_id",
+            "description": "落位ID",
+            "line_no": 154
+          },
+          {
+            "name": "room_id",
+            "description": "所属机房ID",
+            "line_no": 155
+          },
+          {
+            "name": "position_code",
+            "description": "落位编码",
+            "line_no": 156
+          },
+          {
+            "name": "position_status",
+            "description": "落位状态",
+            "line_no": 157
+          },
+          {
+            "name": "sequence_no",
+            "description": "落位顺序号",
+            "line_no": 158
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [
+          "`A机房-01位`",
+          "`A机房-02位`"
+        ],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 149,
+          "end": 163
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:PoD",
+      "type": "ObjectType",
+      "name": "PoD",
+      "aliases": [],
+      "attributes": {
+        "group": "4.3 设备与物流层",
+        "chinese_description": "PoD交付单元。表示交付、到货、安装、移交的核心业务对象。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "pod_id",
+            "description": "PoD ID",
+            "line_no": 171
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 172
+          },
+          {
+            "name": "pod_code",
+            "description": "PoD编码",
+            "line_no": 173
+          },
+          {
+            "name": "pod_type",
+            "description": "PoD类型",
+            "line_no": 174
+          },
+          {
+            "name": "pod_status",
+            "description": "PoD状态",
+            "line_no": 175
+          },
+          {
+            "name": "building_id",
+            "description": "所在大楼ID",
+            "line_no": 176
+          },
+          {
+            "name": "floor_id",
+            "description": "所在楼层ID",
+            "line_no": 177
+          },
+          {
+            "name": "room_id",
+            "description": "所在机房ID",
+            "line_no": 178
+          },
+          {
+            "name": "position_id",
+            "description": "所在落位ID",
+            "line_no": 179
+          },
+          {
+            "name": "planned_arrival_time",
+            "description": "计划到货时间",
+            "line_no": 180
+          },
+          {
+            "name": "actual_arrival_time",
+            "description": "实际到货时间",
+            "line_no": 181
+          },
+          {
+            "name": "planned_install_start_time",
+            "description": "计划安装开始时间",
+            "line_no": 182
+          },
+          {
+            "name": "actual_install_start_time",
+            "description": "实际安装开始时间",
+            "line_no": 183
+          },
+          {
+            "name": "planned_handover_time",
+            "description": "计划移交时间",
+            "line_no": 184
+          },
+          {
+            "name": "actual_handover_time",
+            "description": "实际移交时间",
+            "line_no": 185
+          }
+        ],
+        "status_values": [
+          {
+            "name": "InTransit",
+            "description": "在途",
+            "line_no": 188
+          },
+          {
+            "name": "ArrivedWaitingInstall",
+            "description": "已到货待安装",
+            "line_no": 189
+          },
+          {
+            "name": "Installing",
+            "description": "安装中",
+            "line_no": 190
+          },
+          {
+            "name": "Installed",
+            "description": "已安装",
+            "line_no": 191
+          },
+          {
+            "name": "HandedOver",
+            "description": "已移交",
+            "line_no": 192
+          }
+        ],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 166,
+          "end": 193
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:Shipment",
+      "type": "ObjectType",
+      "name": "Shipment",
+      "aliases": [],
+      "attributes": {
+        "group": "4.3 设备与物流层",
+        "chinese_description": "发货单。表示一次 PoD 发货安排。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "shipment_id",
+            "description": "发货ID",
+            "line_no": 199
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 200
+          },
+          {
+            "name": "shipment_no",
+            "description": "发货单号",
+            "line_no": 201
+          },
+          {
+            "name": "pod_id",
+            "description": "对应PoD ID",
+            "line_no": 202
+          },
+          {
+            "name": "planned_ship_time",
+            "description": "计划发货时间",
+            "line_no": 203
+          },
+          {
+            "name": "planned_arrival_time",
+            "description": "计划到货时间",
+            "line_no": 204
+          },
+          {
+            "name": "actual_arrival_time",
+            "description": "实际到货时间",
+            "line_no": 205
+          },
+          {
+            "name": "shipment_status",
+            "description": "发货状态",
+            "line_no": 206
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 194,
+          "end": 207
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ArrivalEvent",
+      "type": "ObjectType",
+      "name": "ArrivalEvent",
+      "aliases": [],
+      "attributes": {
+        "group": "4.3 设备与物流层",
+        "chinese_description": "到货事件。表示一次 PoD 到货事实。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "arrival_event_id",
+            "description": "到货事件ID",
+            "line_no": 213
+          },
+          {
+            "name": "pod_id",
+            "description": "对应PoD ID",
+            "line_no": 214
+          },
+          {
+            "name": "arrival_time",
+            "description": "到货时间",
+            "line_no": 215
+          },
+          {
+            "name": "arrival_status",
+            "description": "到货状态",
+            "line_no": 216
+          },
+          {
+            "name": "receiving_location",
+            "description": "收货地点",
+            "line_no": 217
+          },
+          {
+            "name": "confirmed_by",
+            "description": "确认人",
+            "line_no": 218
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 208,
+          "end": 219
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ArrivalPlan",
+      "type": "ObjectType",
+      "name": "ArrivalPlan",
+      "aliases": [],
+      "attributes": {
+        "group": "4.3 设备与物流层",
+        "chinese_description": "到货建议方案。表示系统对到货时间的建议方案。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "arrival_plan_id",
+            "description": "到货方案ID",
+            "line_no": 225
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 226
+          },
+          {
+            "name": "pod_id",
+            "description": "对应PoD ID",
+            "line_no": 227
+          },
+          {
+            "name": "recommended_arrival_time",
+            "description": "建议到货时间",
+            "line_no": 228
+          },
+          {
+            "name": "latest_safe_arrival_time",
+            "description": "最晚安全到货时间",
+            "line_no": 229
+          },
+          {
+            "name": "earliest_useful_arrival_time",
+            "description": "最早有意义到货时间",
+            "line_no": 230
+          },
+          {
+            "name": "backlog_risk_level",
+            "description": "积压风险等级",
+            "line_no": 231
+          },
+          {
+            "name": "plan_status",
+            "description": "方案状态",
+            "line_no": 232
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 220,
+          "end": 233
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ActivityTemplate",
+      "type": "ObjectType",
+      "name": "ActivityTemplate",
+      "aliases": [],
+      "attributes": {
+        "group": "4.4 活动与排期层",
+        "chinese_description": "活动模板。表示标准二级活动模板。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "template_id",
+            "description": "活动模板ID",
+            "line_no": 241
+          },
+          {
+            "name": "l1_code",
+            "description": "一级活动编码",
+            "line_no": 242
+          },
+          {
+            "name": "l1_name",
+            "description": "一级活动名称",
+            "line_no": 243
+          },
+          {
+            "name": "l2_code",
+            "description": "二级活动编码",
+            "line_no": 244
+          },
+          {
+            "name": "l2_name",
+            "description": "二级活动名称",
+            "line_no": 245
+          },
+          {
+            "name": "activity_category",
+            "description": "活动分类",
+            "line_no": 246
+          },
+          {
+            "name": "completion_flag",
+            "description": "是否为完成节点标记",
+            "line_no": 247
+          },
+          {
+            "name": "applies_to_product_type",
+            "description": "适用产品形态",
+            "line_no": 248
+          },
+          {
+            "name": "applies_to_cooling_mode",
+            "description": "适用冷却方式",
+            "line_no": 249
+          },
+          {
+            "name": "applies_to_project_scene",
+            "description": "适用项目场景",
+            "line_no": 250
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [
+          "一级活动只作为分类字段保留",
+          "真正进行实例化的是二级活动",
+          "`12.4 移交` 在模板中应标记为关键完成节点"
+        ],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 236,
+          "end": 256
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ActivityDependencyTemplate",
+      "type": "ObjectType",
+      "name": "ActivityDependencyTemplate",
+      "aliases": [],
+      "attributes": {
+        "group": "4.4 活动与排期层",
+        "chinese_description": "活动依赖模板。表示标准活动依赖模板。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "dependency_template_id",
+            "description": "依赖模板ID",
+            "line_no": 262
+          },
+          {
+            "name": "predecessor_template_id",
+            "description": "前置活动模板ID",
+            "line_no": 263
+          },
+          {
+            "name": "successor_template_id",
+            "description": "后继活动模板ID",
+            "line_no": 264
+          },
+          {
+            "name": "dependency_type",
+            "description": "依赖类型",
+            "line_no": 265
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 257,
+          "end": 266
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:SLAStandard",
+      "type": "ObjectType",
+      "name": "SLAStandard",
+      "aliases": [],
+      "attributes": {
+        "group": "4.4 活动与排期层",
+        "chinese_description": "标准SLA。表示标准活动工期。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "sla_id",
+            "description": "SLA ID",
+            "line_no": 272
+          },
+          {
+            "name": "template_id",
+            "description": "活动模板ID",
+            "line_no": 273
+          },
+          {
+            "name": "standard_duration",
+            "description": "标准时长",
+            "line_no": 274
+          },
+          {
+            "name": "duration_unit",
+            "description": "时长单位",
+            "line_no": 275
+          },
+          {
+            "name": "crew_capacity_assumption",
+            "description": "施工队能力假设",
+            "line_no": 276
+          },
+          {
+            "name": "scenario_tag",
+            "description": "场景标签",
+            "line_no": 277
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 267,
+          "end": 278
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ActivityInstance",
+      "type": "ObjectType",
+      "name": "ActivityInstance",
+      "aliases": [],
+      "attributes": {
+        "group": "4.4 活动与排期层",
+        "chinese_description": "活动实例。表示某个 PoD 在项目中的实际二级活动实例。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "activity_id",
+            "description": "活动实例ID",
+            "line_no": 284
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 285
+          },
+          {
+            "name": "pod_id",
+            "description": "所属PoD ID",
+            "line_no": 286
+          },
+          {
+            "name": "template_id",
+            "description": "活动模板ID",
+            "line_no": 287
+          },
+          {
+            "name": "l1_name",
+            "description": "一级活动名称",
+            "line_no": 288
+          },
+          {
+            "name": "l2_name",
+            "description": "二级活动名称",
+            "line_no": 289
+          },
+          {
+            "name": "activity_status",
+            "description": "活动状态",
+            "line_no": 290
+          },
+          {
+            "name": "planned_start_time",
+            "description": "计划开始时间",
+            "line_no": 291
+          },
+          {
+            "name": "planned_finish_time",
+            "description": "计划结束时间",
+            "line_no": 292
+          },
+          {
+            "name": "latest_start_time",
+            "description": "最晚开始时间",
+            "line_no": 293
+          },
+          {
+            "name": "latest_finish_time",
+            "description": "最晚结束时间",
+            "line_no": 294
+          },
+          {
+            "name": "actual_start_time",
+            "description": "实际开始时间",
+            "line_no": 295
+          },
+          {
+            "name": "actual_finish_time",
+            "description": "实际结束时间",
+            "line_no": 296
+          },
+          {
+            "name": "is_milestone_anchor",
+            "description": "是否为里程碑锚点",
+            "line_no": 297
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 279,
+          "end": 298
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:PoDSchedule",
+      "type": "ObjectType",
+      "name": "PoDSchedule",
+      "aliases": [],
+      "attributes": {
+        "group": "4.4 活动与排期层",
+        "chinese_description": "PoD排期。表示某个 PoD 的活动排期结果。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "pod_schedule_id",
+            "description": "PoD排期ID",
+            "line_no": 304
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 305
+          },
+          {
+            "name": "pod_id",
+            "description": "对应PoD ID",
+            "line_no": 306
+          },
+          {
+            "name": "anchor_activity_id",
+            "description": "锚点活动ID",
+            "line_no": 307
+          },
+          {
+            "name": "schedule_type",
+            "description": "排期类型",
+            "line_no": 308
+          },
+          {
+            "name": "generated_at",
+            "description": "生成时间",
+            "line_no": 309
+          },
+          {
+            "name": "is_feasible",
+            "description": "是否可执行",
+            "line_no": 310
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 299,
+          "end": 311
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:Crew",
+      "type": "ObjectType",
+      "name": "Crew",
+      "aliases": [],
+      "attributes": {
+        "group": "4.5 施工执行层",
+        "chinese_description": "施工队。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "crew_id",
+            "description": "施工队ID",
+            "line_no": 319
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 320
+          },
+          {
+            "name": "crew_status",
+            "description": "施工队状态",
+            "line_no": 321
+          },
+          {
+            "name": "daily_pod_capacity",
+            "description": "每日PoD安装能力",
+            "line_no": 322
+          },
+          {
+            "name": "parallel_limit",
+            "description": "并行上限",
+            "line_no": 323
+          }
+        ],
+        "status_values": [],
+        "rules": [
+          "每个施工队同一时间只能安装一个 PoD",
+          "每个施工队每天可安装的 PoD 数量采用固定规则"
+        ],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 314,
+          "end": 328
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:WorkAssignment",
+      "type": "ObjectType",
+      "name": "WorkAssignment",
+      "aliases": [],
+      "attributes": {
+        "group": "4.5 施工执行层",
+        "chinese_description": "施工分配。表示某个施工队在某个时间窗内被分配到哪个机房、安装哪个 PoD。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "assignment_id",
+            "description": "分配ID",
+            "line_no": 334
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 335
+          },
+          {
+            "name": "crew_id",
+            "description": "施工队ID",
+            "line_no": 336
+          },
+          {
+            "name": "pod_id",
+            "description": "PoD ID",
+            "line_no": 337
+          },
+          {
+            "name": "room_id",
+            "description": "机房ID",
+            "line_no": 338
+          },
+          {
+            "name": "position_id",
+            "description": "落位ID",
+            "line_no": 339
+          },
+          {
+            "name": "assignment_date",
+            "description": "分配日期",
+            "line_no": 340
+          },
+          {
+            "name": "start_time",
+            "description": "开始时间",
+            "line_no": 341
+          },
+          {
+            "name": "finish_time",
+            "description": "结束时间",
+            "line_no": 342
+          },
+          {
+            "name": "assignment_status",
+            "description": "分配状态",
+            "line_no": 343
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 329,
+          "end": 344
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:PlacementPlan",
+      "type": "ObjectType",
+      "name": "PlacementPlan",
+      "aliases": [],
+      "attributes": {
+        "group": "4.6 决策与解释层",
+        "chinese_description": "落位建议方案。表示 PoD 落位建议。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "placement_plan_id",
+            "description": "落位方案ID",
+            "line_no": 352
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 353
+          },
+          {
+            "name": "pod_id",
+            "description": "对应PoD ID",
+            "line_no": 354
+          },
+          {
+            "name": "building_id",
+            "description": "建议大楼ID",
+            "line_no": 355
+          },
+          {
+            "name": "floor_id",
+            "description": "建议楼层ID",
+            "line_no": 356
+          },
+          {
+            "name": "room_id",
+            "description": "建议机房ID",
+            "line_no": 357
+          },
+          {
+            "name": "position_id",
+            "description": "建议落位ID",
+            "line_no": 358
+          },
+          {
+            "name": "placement_score",
+            "description": "落位评分",
+            "line_no": 359
+          },
+          {
+            "name": "plan_status",
+            "description": "方案状态",
+            "line_no": 360
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 347,
+          "end": 361
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ConstraintViolation",
+      "type": "ObjectType",
+      "name": "ConstraintViolation",
+      "aliases": [],
+      "attributes": {
+        "group": "4.6 决策与解释层",
+        "chinese_description": "约束冲突。表示当前方案不满足约束的原因。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "violation_id",
+            "description": "冲突ID",
+            "line_no": 367
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 368
+          },
+          {
+            "name": "object_type",
+            "description": "冲突对象类型",
+            "line_no": 369
+          },
+          {
+            "name": "object_id",
+            "description": "冲突对象ID",
+            "line_no": 370
+          },
+          {
+            "name": "violation_type",
+            "description": "冲突类型",
+            "line_no": 371
+          },
+          {
+            "name": "severity",
+            "description": "严重程度",
+            "line_no": 372
+          },
+          {
+            "name": "message",
+            "description": "说明信息",
+            "line_no": 373
+          },
+          {
+            "name": "related_milestone_id",
+            "description": "关联里程碑ID",
+            "line_no": 374
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [
+          {
+            "name": "MilestoneMissRisk",
+            "description": "里程碑失约风险",
+            "line_no": 377
+          },
+          {
+            "name": "ArrivalTooLate",
+            "description": "到货过晚",
+            "line_no": 378
+          },
+          {
+            "name": "ArrivalTooEarlyBacklog",
+            "description": "到货过早导致积压",
+            "line_no": 379
+          },
+          {
+            "name": "CrewCapacityExceeded",
+            "description": "施工队能力超限",
+            "line_no": 380
+          },
+          {
+            "name": "PositionUnavailable",
+            "description": "落位不可用",
+            "line_no": 381
+          },
+          {
+            "name": "DependencyUnsatisfied",
+            "description": "依赖未满足",
+            "line_no": 382
+          }
+        ],
+        "source_lines": {
+          "start": 362,
+          "end": 383
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:DecisionRecommendation",
+      "type": "ObjectType",
+      "name": "DecisionRecommendation",
+      "aliases": [],
+      "attributes": {
+        "group": "4.6 决策与解释层",
+        "chinese_description": "决策建议。表示 agent 输出的建议结果。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "recommendation_id",
+            "description": "建议ID",
+            "line_no": 389
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 390
+          },
+          {
+            "name": "recommendation_type",
+            "description": "建议类型",
+            "line_no": 391
+          },
+          {
+            "name": "target_object_type",
+            "description": "目标对象类型",
+            "line_no": 392
+          },
+          {
+            "name": "target_object_id",
+            "description": "目标对象ID",
+            "line_no": 393
+          },
+          {
+            "name": "recommendation_text",
+            "description": "建议内容",
+            "line_no": 394
+          },
+          {
+            "name": "confidence",
+            "description": "置信度",
+            "line_no": 395
+          },
+          {
+            "name": "created_at",
+            "description": "创建时间",
+            "line_no": 396
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 384,
+          "end": 399
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:waiting_install_duration",
+      "type": "DerivedMetric",
+      "name": "waiting_install_duration",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "待安装时长，等于实际安装开始时间减去实际到货时间",
+        "source_lines": {
+          "start": 487,
+          "end": 487
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:latest_safe_arrival_time",
+      "type": "DerivedMetric",
+      "name": "latest_safe_arrival_time",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "最晚安全到货时间",
+        "source_lines": {
+          "start": 488,
+          "end": 488
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:earliest_useful_arrival_time",
+      "type": "DerivedMetric",
+      "name": "earliest_useful_arrival_time",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "最早有意义到货时间",
+        "source_lines": {
+          "start": 489,
+          "end": 489
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:arrival_delay_duration",
+      "type": "DerivedMetric",
+      "name": "arrival_delay_duration",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "到货延迟时长",
+        "source_lines": {
+          "start": 490,
+          "end": 490
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:arrival_backlog_risk_level",
+      "type": "DerivedMetric",
+      "name": "arrival_backlog_risk_level",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "到货积压风险等级",
+        "source_lines": {
+          "start": 491,
+          "end": 491
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:room_handover_completed_pod_count",
+      "type": "DerivedMetric",
+      "name": "room_handover_completed_pod_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "机房已完成移交的PoD数量",
+        "source_lines": {
+          "start": 492,
+          "end": 492
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:room_handover_completion_rate",
+      "type": "DerivedMetric",
+      "name": "room_handover_completion_rate",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "机房移交完成率",
+        "source_lines": {
+          "start": 493,
+          "end": 493
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:room_milestone_gap_pod_count",
+      "type": "DerivedMetric",
+      "name": "room_milestone_gap_pod_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "机房里程碑差额PoD数量",
+        "source_lines": {
+          "start": 494,
+          "end": 494
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:floor_handover_completed_room_count",
+      "type": "DerivedMetric",
+      "name": "floor_handover_completed_room_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "楼层已完成移交的机房数量",
+        "source_lines": {
+          "start": 495,
+          "end": 495
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:floor_milestone_completion_rate",
+      "type": "DerivedMetric",
+      "name": "floor_milestone_completion_rate",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "楼层里程碑完成率",
+        "source_lines": {
+          "start": 496,
+          "end": 496
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:floor_milestone_gap_room_count",
+      "type": "DerivedMetric",
+      "name": "floor_milestone_gap_room_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "楼层里程碑差额机房数量",
+        "source_lines": {
+          "start": 497,
+          "end": 497
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:crew_daily_load",
+      "type": "DerivedMetric",
+      "name": "crew_daily_load",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "施工队日负载",
+        "source_lines": {
+          "start": 498,
+          "end": 498
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:crew_capacity_utilization",
+      "type": "DerivedMetric",
+      "name": "crew_capacity_utilization",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "施工队能力利用率",
+        "source_lines": {
+          "start": 499,
+          "end": 499
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:room_daily_install_count",
+      "type": "DerivedMetric",
+      "name": "room_daily_install_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "机房日安装PoD数量",
+        "source_lines": {
+          "start": 500,
+          "end": 500
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:floor_daily_install_count",
+      "type": "DerivedMetric",
+      "name": "floor_daily_install_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "楼层日安装PoD数量",
+        "source_lines": {
+          "start": 501,
+          "end": 501
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:schedule_feasibility_flag",
+      "type": "DerivedMetric",
+      "name": "schedule_feasibility_flag",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "排期可执行标记",
+        "source_lines": {
+          "start": 502,
+          "end": 502
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:placement_feasibility_flag",
+      "type": "DerivedMetric",
+      "name": "placement_feasibility_flag",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "落位可执行标记",
+        "source_lines": {
+          "start": 503,
+          "end": 503
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:milestone_risk_level",
+      "type": "DerivedMetric",
+      "name": "milestone_risk_level",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "里程碑风险等级",
+        "source_lines": {
+          "start": 504,
+          "end": 504
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    }
+  ],
+  "relations": [
+    {
+      "source": "object_type:Project",
+      "target": "object_type:Building",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:Building",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.1 项目与空间关系",
+        "description": "项目包含大楼",
+        "source_lines": {
+          "start": 426,
+          "end": 426
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Building",
+      "target": "object_type:Floor",
+      "source_id": "object_type:Building",
+      "target_id": "object_type:Floor",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.1 项目与空间关系",
+        "description": "大楼包含楼层",
+        "source_lines": {
+          "start": 427,
+          "end": 427
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Floor",
+      "target": "object_type:Room",
+      "source_id": "object_type:Floor",
+      "target_id": "object_type:Room",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.1 项目与空间关系",
+        "description": "楼层包含机房",
+        "source_lines": {
+          "start": 428,
+          "end": 428
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Room",
+      "target": "object_type:PoDPosition",
+      "source_id": "object_type:Room",
+      "target_id": "object_type:PoDPosition",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.1 项目与空间关系",
+        "description": "机房包含PoD落位",
+        "source_lines": {
+          "start": 429,
+          "end": 429
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Project",
+      "target": "object_type:RoomMilestone",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:RoomMilestone",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.2 项目与里程碑关系",
+        "description": "项目包含机房里程碑",
+        "source_lines": {
+          "start": 433,
+          "end": 433
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Project",
+      "target": "object_type:FloorMilestone",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:FloorMilestone",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.2 项目与里程碑关系",
+        "description": "项目包含楼层里程碑",
+        "source_lines": {
+          "start": 434,
+          "end": 434
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:RoomMilestone",
+      "target": "object_type:Room",
+      "source_id": "object_type:RoomMilestone",
+      "target_id": "object_type:Room",
+      "relation": "CONSTRAINS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.2 项目与里程碑关系",
+        "description": "机房里程碑约束机房",
+        "source_lines": {
+          "start": 435,
+          "end": 435
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:FloorMilestone",
+      "target": "object_type:Floor",
+      "source_id": "object_type:FloorMilestone",
+      "target_id": "object_type:Floor",
+      "relation": "CONSTRAINS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.2 项目与里程碑关系",
+        "description": "楼层里程碑约束楼层",
+        "source_lines": {
+          "start": 436,
+          "end": 436
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:FloorMilestone",
+      "target": "object_type:RoomMilestone",
+      "source_id": "object_type:FloorMilestone",
+      "target_id": "object_type:RoomMilestone",
+      "relation": "AGGREGATES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.2 项目与里程碑关系",
+        "description": "楼层里程碑聚合机房里程碑",
+        "source_lines": {
+          "start": 437,
+          "end": 437
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Project",
+      "target": "object_type:PoD",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:PoD",
+      "relation": "DELIVERS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.3 项目与 PoD 关系",
+        "description": "项目交付PoD",
+        "source_lines": {
+          "start": 441,
+          "end": 441
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:Building",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:Building",
+      "relation": "ASSIGNED_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.3 项目与 PoD 关系",
+        "description": "PoD分配到大楼",
+        "source_lines": {
+          "start": 442,
+          "end": 442
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:Floor",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:Floor",
+      "relation": "ASSIGNED_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.3 项目与 PoD 关系",
+        "description": "PoD分配到楼层",
+        "source_lines": {
+          "start": 443,
+          "end": 443
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:Room",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:Room",
+      "relation": "ASSIGNED_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.3 项目与 PoD 关系",
+        "description": "PoD分配到机房",
+        "source_lines": {
+          "start": 444,
+          "end": 444
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:PoDPosition",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:PoDPosition",
+      "relation": "ASSIGNED_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.3 项目与 PoD 关系",
+        "description": "PoD分配到落位",
+        "source_lines": {
+          "start": 445,
+          "end": 445
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Project",
+      "target": "object_type:Shipment",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:Shipment",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.4 PoD 与物流关系",
+        "description": "项目包含发货单",
+        "source_lines": {
+          "start": 449,
+          "end": 449
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Shipment",
+      "target": "object_type:PoD",
+      "source_id": "object_type:Shipment",
+      "target_id": "object_type:PoD",
+      "relation": "SHIPS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.4 PoD 与物流关系",
+        "description": "发货单运输PoD",
+        "source_lines": {
+          "start": 450,
+          "end": 450
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:ArrivalEvent",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:ArrivalEvent",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.4 PoD 与物流关系",
+        "description": "PoD具有到货事件",
+        "source_lines": {
+          "start": 451,
+          "end": 451
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ArrivalPlan",
+      "target": "object_type:PoD",
+      "source_id": "object_type:ArrivalPlan",
+      "target_id": "object_type:PoD",
+      "relation": "APPLIES_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.4 PoD 与物流关系",
+        "description": "到货方案作用于PoD",
+        "source_lines": {
+          "start": 452,
+          "end": 452
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:ActivityInstance",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:ActivityInstance",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "PoD具有活动实例",
+        "source_lines": {
+          "start": 456,
+          "end": 456
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ActivityTemplate",
+      "target": "object_type:ActivityInstance",
+      "source_id": "object_type:ActivityTemplate",
+      "target_id": "object_type:ActivityInstance",
+      "relation": "GENERATES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "活动模板生成活动实例",
+        "source_lines": {
+          "start": 457,
+          "end": 457
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ActivityInstance",
+      "target": "object_type:SLAStandard",
+      "source_id": "object_type:ActivityInstance",
+      "target_id": "object_type:SLAStandard",
+      "relation": "USES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "活动实例使用标准SLA",
+        "source_lines": {
+          "start": 458,
+          "end": 458
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ActivityInstance",
+      "target": "object_type:ActivityInstance",
+      "source_id": "object_type:ActivityInstance",
+      "target_id": "object_type:ActivityInstance",
+      "relation": "DEPENDS_ON",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "活动实例依赖活动实例",
+        "source_lines": {
+          "start": 459,
+          "end": 459
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ActivityDependencyTemplate",
+      "target": "object_type:ActivityInstance",
+      "source_id": "object_type:ActivityDependencyTemplate",
+      "target_id": "object_type:ActivityInstance",
+      "relation": "DEFINES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "活动依赖模板定义活动实例关系",
+        "source_lines": {
+          "start": 460,
+          "end": 460
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoDSchedule",
+      "target": "object_type:ActivityInstance",
+      "source_id": "object_type:PoDSchedule",
+      "target_id": "object_type:ActivityInstance",
+      "relation": "CONTAINS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "PoD排期包含活动实例",
+        "source_lines": {
+          "start": 461,
+          "end": 461
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoDSchedule",
+      "target": "object_type:PoD",
+      "source_id": "object_type:PoDSchedule",
+      "target_id": "object_type:PoD",
+      "relation": "APPLIES_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "PoD排期作用于PoD",
+        "source_lines": {
+          "start": 462,
+          "end": 462
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Project",
+      "target": "object_type:Crew",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:Crew",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.6 施工执行关系",
+        "description": "项目包含施工队",
+        "source_lines": {
+          "start": 466,
+          "end": 466
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Crew",
+      "target": "object_type:WorkAssignment",
+      "source_id": "object_type:Crew",
+      "target_id": "object_type:WorkAssignment",
+      "relation": "EXECUTES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.6 施工执行关系",
+        "description": "施工队执行施工分配",
+        "source_lines": {
+          "start": 467,
+          "end": 467
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:WorkAssignment",
+      "target": "object_type:PoD",
+      "source_id": "object_type:WorkAssignment",
+      "target_id": "object_type:PoD",
+      "relation": "ASSIGNS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.6 施工执行关系",
+        "description": "施工分配指向PoD",
+        "source_lines": {
+          "start": 468,
+          "end": 468
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:WorkAssignment",
+      "target": "object_type:Room",
+      "source_id": "object_type:WorkAssignment",
+      "target_id": "object_type:Room",
+      "relation": "OCCURS_IN",
+      "evidence": [],
+      "attributes": {
+        "group": "5.6 施工执行关系",
+        "description": "施工分配发生在机房",
+        "source_lines": {
+          "start": 469,
+          "end": 469
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:WorkAssignment",
+      "target": "object_type:PoDPosition",
+      "source_id": "object_type:WorkAssignment",
+      "target_id": "object_type:PoDPosition",
+      "relation": "OCCURS_AT",
+      "evidence": [],
+      "attributes": {
+        "group": "5.6 施工执行关系",
+        "description": "施工分配发生在落位",
+        "source_lines": {
+          "start": 470,
+          "end": 470
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PlacementPlan",
+      "target": "object_type:PoD",
+      "source_id": "object_type:PlacementPlan",
+      "target_id": "object_type:PoD",
+      "relation": "APPLIES_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "落位方案作用于PoD",
+        "source_lines": {
+          "start": 474,
+          "end": 474
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PlacementPlan",
+      "target": "object_type:PoDPosition",
+      "source_id": "object_type:PlacementPlan",
+      "target_id": "object_type:PoDPosition",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "落位方案引用落位",
+        "source_lines": {
+          "start": 475,
+          "end": 475
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ConstraintViolation",
+      "target": "object_type:PoD",
+      "source_id": "object_type:ConstraintViolation",
+      "target_id": "object_type:PoD",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "约束冲突关联PoD",
+        "source_lines": {
+          "start": 476,
+          "end": 476
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ConstraintViolation",
+      "target": "object_type:RoomMilestone",
+      "source_id": "object_type:ConstraintViolation",
+      "target_id": "object_type:RoomMilestone",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "约束冲突关联机房里程碑",
+        "source_lines": {
+          "start": 477,
+          "end": 477
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ConstraintViolation",
+      "target": "object_type:FloorMilestone",
+      "source_id": "object_type:ConstraintViolation",
+      "target_id": "object_type:FloorMilestone",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "约束冲突关联楼层里程碑",
+        "source_lines": {
+          "start": 478,
+          "end": 478
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:DecisionRecommendation",
+      "target": "object_type:ArrivalPlan",
+      "source_id": "object_type:DecisionRecommendation",
+      "target_id": "object_type:ArrivalPlan",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "决策建议引用到货方案",
+        "source_lines": {
+          "start": 479,
+          "end": 479
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:DecisionRecommendation",
+      "target": "object_type:PlacementPlan",
+      "source_id": "object_type:DecisionRecommendation",
+      "target_id": "object_type:PlacementPlan",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "决策建议引用落位方案",
+        "source_lines": {
+          "start": 480,
+          "end": 480
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:DecisionRecommendation",
+      "target": "object_type:ConstraintViolation",
+      "source_id": "object_type:DecisionRecommendation",
+      "target_id": "object_type:ConstraintViolation",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "决策建议引用约束冲突",
+        "source_lines": {
+          "start": 481,
+          "end": 481
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    }
+  ],
+  "nodes": [
+    {
+      "id": "object_type:Project",
+      "type": "ObjectType",
+      "name": "Project",
+      "aliases": [],
+      "attributes": {
+        "group": "4.1 项目与目标层",
+        "chinese_description": "项目。表示一个面向客户的交付项目，是所有对象的业务聚合根。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "project_id",
+            "description": "项目ID",
+            "line_no": 69
+          },
+          {
+            "name": "project_name",
+            "description": "项目名称",
+            "line_no": 70
+          },
+          {
+            "name": "project_status",
+            "description": "项目状态",
+            "line_no": 71
+          },
+          {
+            "name": "product_type",
+            "description": "产品形态",
+            "line_no": 72
+          },
+          {
+            "name": "cooling_mode",
+            "description": "冷却方式",
+            "line_no": 73
+          },
+          {
+            "name": "project_scene",
+            "description": "项目场景",
+            "line_no": 74
+          },
+          {
+            "name": "planned_start_date",
+            "description": "计划开始日期",
+            "line_no": 75
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 64,
+          "end": 76
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:RoomMilestone",
+      "type": "ObjectType",
+      "name": "RoomMilestone",
+      "aliases": [],
+      "attributes": {
+        "group": "4.1 项目与目标层",
+        "chinese_description": "机房里程碑。表示机房级里程碑约束。",
+        "semantic_definition": "",
+        "key_properties": [
+          {
+            "name": "room_milestone_id",
+            "description": "机房里程碑ID",
+            "line_no": 85
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 86
+          },
+          {
+            "name": "room_id",
+            "description": "目标机房ID",
+            "line_no": 87
+          },
+          {
+            "name": "proposed_by",
+            "description": "提出方",
+            "line_no": 88
+          },
+          {
+            "name": "target_pod_count",
+            "description": "目标PoD数量",
+            "line_no": 89
+          },
+          {
+            "name": "completion_event_code",
+            "description": "完成事件编码",
+            "line_no": 90
+          },
+          {
+            "name": "completion_event_name",
+            "description": "完成事件名称",
+            "line_no": 91
+          },
+          {
+            "name": "due_time",
+            "description": "截止时间",
+            "line_no": 92
+          },
+          {
+            "name": "priority",
+            "description": "优先级",
+            "line_no": 93
+          },
+          {
+            "name": "status",
+            "description": "状态",
+            "line_no": 94
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [
+          "`completion_event_name` 第一版固定为 `移交`"
+        ],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 77,
+          "end": 98
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:FloorMilestone",
+      "type": "ObjectType",
+      "name": "FloorMilestone",
+      "aliases": [],
+      "attributes": {
+        "group": "4.1 项目与目标层",
+        "chinese_description": "楼层里程碑。表示楼层级里程碑约束。",
+        "semantic_definition": "",
+        "key_properties": [
+          {
+            "name": "floor_milestone_id",
+            "description": "楼层里程碑ID",
+            "line_no": 107
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 108
+          },
+          {
+            "name": "floor_id",
+            "description": "目标楼层ID",
+            "line_no": 109
+          },
+          {
+            "name": "proposed_by",
+            "description": "提出方",
+            "line_no": 110
+          },
+          {
+            "name": "due_time",
+            "description": "截止时间",
+            "line_no": 111
+          },
+          {
+            "name": "required_room_count",
+            "description": "要求完成的机房数量",
+            "line_no": 112
+          },
+          {
+            "name": "completed_room_count",
+            "description": "已完成的机房数量",
+            "line_no": 113
+          },
+          {
+            "name": "status",
+            "description": "状态",
+            "line_no": 114
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 99,
+          "end": 115
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:Building",
+      "type": "ObjectType",
+      "name": "Building",
+      "aliases": [],
+      "attributes": {
+        "group": "4.2 空间层",
+        "chinese_description": "大楼。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "building_id",
+            "description": "大楼ID",
+            "line_no": 123
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 124
+          },
+          {
+            "name": "building_name",
+            "description": "大楼名称",
+            "line_no": 125
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 118,
+          "end": 126
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:Floor",
+      "type": "ObjectType",
+      "name": "Floor",
+      "aliases": [],
+      "attributes": {
+        "group": "4.2 空间层",
+        "chinese_description": "楼层。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "floor_id",
+            "description": "楼层ID",
+            "line_no": 132
+          },
+          {
+            "name": "building_id",
+            "description": "所属大楼ID",
+            "line_no": 133
+          },
+          {
+            "name": "floor_no",
+            "description": "楼层编号",
+            "line_no": 134
+          },
+          {
+            "name": "install_sequence",
+            "description": "安装顺序",
+            "line_no": 135
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 127,
+          "end": 136
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:Room",
+      "type": "ObjectType",
+      "name": "Room",
+      "aliases": [],
+      "attributes": {
+        "group": "4.2 空间层",
+        "chinese_description": "机房。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "room_id",
+            "description": "机房ID",
+            "line_no": 142
+          },
+          {
+            "name": "floor_id",
+            "description": "所属楼层ID",
+            "line_no": 143
+          },
+          {
+            "name": "room_type",
+            "description": "机房类型",
+            "line_no": 144
+          },
+          {
+            "name": "max_pod_capacity",
+            "description": "最大PoD容量",
+            "line_no": 145
+          },
+          {
+            "name": "required_handover_pod_count",
+            "description": "要求移交的PoD数量",
+            "line_no": 146
+          },
+          {
+            "name": "room_status",
+            "description": "机房状态",
+            "line_no": 147
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 137,
+          "end": 148
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:PoDPosition",
+      "type": "ObjectType",
+      "name": "PoDPosition",
+      "aliases": [],
+      "attributes": {
+        "group": "4.2 空间层",
+        "chinese_description": "PoD落位。表示机房内的 PoD 安装落位。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "position_id",
+            "description": "落位ID",
+            "line_no": 154
+          },
+          {
+            "name": "room_id",
+            "description": "所属机房ID",
+            "line_no": 155
+          },
+          {
+            "name": "position_code",
+            "description": "落位编码",
+            "line_no": 156
+          },
+          {
+            "name": "position_status",
+            "description": "落位状态",
+            "line_no": 157
+          },
+          {
+            "name": "sequence_no",
+            "description": "落位顺序号",
+            "line_no": 158
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [
+          "`A机房-01位`",
+          "`A机房-02位`"
+        ],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 149,
+          "end": 163
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:PoD",
+      "type": "ObjectType",
+      "name": "PoD",
+      "aliases": [],
+      "attributes": {
+        "group": "4.3 设备与物流层",
+        "chinese_description": "PoD交付单元。表示交付、到货、安装、移交的核心业务对象。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "pod_id",
+            "description": "PoD ID",
+            "line_no": 171
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 172
+          },
+          {
+            "name": "pod_code",
+            "description": "PoD编码",
+            "line_no": 173
+          },
+          {
+            "name": "pod_type",
+            "description": "PoD类型",
+            "line_no": 174
+          },
+          {
+            "name": "pod_status",
+            "description": "PoD状态",
+            "line_no": 175
+          },
+          {
+            "name": "building_id",
+            "description": "所在大楼ID",
+            "line_no": 176
+          },
+          {
+            "name": "floor_id",
+            "description": "所在楼层ID",
+            "line_no": 177
+          },
+          {
+            "name": "room_id",
+            "description": "所在机房ID",
+            "line_no": 178
+          },
+          {
+            "name": "position_id",
+            "description": "所在落位ID",
+            "line_no": 179
+          },
+          {
+            "name": "planned_arrival_time",
+            "description": "计划到货时间",
+            "line_no": 180
+          },
+          {
+            "name": "actual_arrival_time",
+            "description": "实际到货时间",
+            "line_no": 181
+          },
+          {
+            "name": "planned_install_start_time",
+            "description": "计划安装开始时间",
+            "line_no": 182
+          },
+          {
+            "name": "actual_install_start_time",
+            "description": "实际安装开始时间",
+            "line_no": 183
+          },
+          {
+            "name": "planned_handover_time",
+            "description": "计划移交时间",
+            "line_no": 184
+          },
+          {
+            "name": "actual_handover_time",
+            "description": "实际移交时间",
+            "line_no": 185
+          }
+        ],
+        "status_values": [
+          {
+            "name": "InTransit",
+            "description": "在途",
+            "line_no": 188
+          },
+          {
+            "name": "ArrivedWaitingInstall",
+            "description": "已到货待安装",
+            "line_no": 189
+          },
+          {
+            "name": "Installing",
+            "description": "安装中",
+            "line_no": 190
+          },
+          {
+            "name": "Installed",
+            "description": "已安装",
+            "line_no": 191
+          },
+          {
+            "name": "HandedOver",
+            "description": "已移交",
+            "line_no": 192
+          }
+        ],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 166,
+          "end": 193
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:Shipment",
+      "type": "ObjectType",
+      "name": "Shipment",
+      "aliases": [],
+      "attributes": {
+        "group": "4.3 设备与物流层",
+        "chinese_description": "发货单。表示一次 PoD 发货安排。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "shipment_id",
+            "description": "发货ID",
+            "line_no": 199
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 200
+          },
+          {
+            "name": "shipment_no",
+            "description": "发货单号",
+            "line_no": 201
+          },
+          {
+            "name": "pod_id",
+            "description": "对应PoD ID",
+            "line_no": 202
+          },
+          {
+            "name": "planned_ship_time",
+            "description": "计划发货时间",
+            "line_no": 203
+          },
+          {
+            "name": "planned_arrival_time",
+            "description": "计划到货时间",
+            "line_no": 204
+          },
+          {
+            "name": "actual_arrival_time",
+            "description": "实际到货时间",
+            "line_no": 205
+          },
+          {
+            "name": "shipment_status",
+            "description": "发货状态",
+            "line_no": 206
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 194,
+          "end": 207
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ArrivalEvent",
+      "type": "ObjectType",
+      "name": "ArrivalEvent",
+      "aliases": [],
+      "attributes": {
+        "group": "4.3 设备与物流层",
+        "chinese_description": "到货事件。表示一次 PoD 到货事实。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "arrival_event_id",
+            "description": "到货事件ID",
+            "line_no": 213
+          },
+          {
+            "name": "pod_id",
+            "description": "对应PoD ID",
+            "line_no": 214
+          },
+          {
+            "name": "arrival_time",
+            "description": "到货时间",
+            "line_no": 215
+          },
+          {
+            "name": "arrival_status",
+            "description": "到货状态",
+            "line_no": 216
+          },
+          {
+            "name": "receiving_location",
+            "description": "收货地点",
+            "line_no": 217
+          },
+          {
+            "name": "confirmed_by",
+            "description": "确认人",
+            "line_no": 218
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 208,
+          "end": 219
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ArrivalPlan",
+      "type": "ObjectType",
+      "name": "ArrivalPlan",
+      "aliases": [],
+      "attributes": {
+        "group": "4.3 设备与物流层",
+        "chinese_description": "到货建议方案。表示系统对到货时间的建议方案。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "arrival_plan_id",
+            "description": "到货方案ID",
+            "line_no": 225
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 226
+          },
+          {
+            "name": "pod_id",
+            "description": "对应PoD ID",
+            "line_no": 227
+          },
+          {
+            "name": "recommended_arrival_time",
+            "description": "建议到货时间",
+            "line_no": 228
+          },
+          {
+            "name": "latest_safe_arrival_time",
+            "description": "最晚安全到货时间",
+            "line_no": 229
+          },
+          {
+            "name": "earliest_useful_arrival_time",
+            "description": "最早有意义到货时间",
+            "line_no": 230
+          },
+          {
+            "name": "backlog_risk_level",
+            "description": "积压风险等级",
+            "line_no": 231
+          },
+          {
+            "name": "plan_status",
+            "description": "方案状态",
+            "line_no": 232
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 220,
+          "end": 233
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ActivityTemplate",
+      "type": "ObjectType",
+      "name": "ActivityTemplate",
+      "aliases": [],
+      "attributes": {
+        "group": "4.4 活动与排期层",
+        "chinese_description": "活动模板。表示标准二级活动模板。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "template_id",
+            "description": "活动模板ID",
+            "line_no": 241
+          },
+          {
+            "name": "l1_code",
+            "description": "一级活动编码",
+            "line_no": 242
+          },
+          {
+            "name": "l1_name",
+            "description": "一级活动名称",
+            "line_no": 243
+          },
+          {
+            "name": "l2_code",
+            "description": "二级活动编码",
+            "line_no": 244
+          },
+          {
+            "name": "l2_name",
+            "description": "二级活动名称",
+            "line_no": 245
+          },
+          {
+            "name": "activity_category",
+            "description": "活动分类",
+            "line_no": 246
+          },
+          {
+            "name": "completion_flag",
+            "description": "是否为完成节点标记",
+            "line_no": 247
+          },
+          {
+            "name": "applies_to_product_type",
+            "description": "适用产品形态",
+            "line_no": 248
+          },
+          {
+            "name": "applies_to_cooling_mode",
+            "description": "适用冷却方式",
+            "line_no": 249
+          },
+          {
+            "name": "applies_to_project_scene",
+            "description": "适用项目场景",
+            "line_no": 250
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [
+          "一级活动只作为分类字段保留",
+          "真正进行实例化的是二级活动",
+          "`12.4 移交` 在模板中应标记为关键完成节点"
+        ],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 236,
+          "end": 256
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ActivityDependencyTemplate",
+      "type": "ObjectType",
+      "name": "ActivityDependencyTemplate",
+      "aliases": [],
+      "attributes": {
+        "group": "4.4 活动与排期层",
+        "chinese_description": "活动依赖模板。表示标准活动依赖模板。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "dependency_template_id",
+            "description": "依赖模板ID",
+            "line_no": 262
+          },
+          {
+            "name": "predecessor_template_id",
+            "description": "前置活动模板ID",
+            "line_no": 263
+          },
+          {
+            "name": "successor_template_id",
+            "description": "后继活动模板ID",
+            "line_no": 264
+          },
+          {
+            "name": "dependency_type",
+            "description": "依赖类型",
+            "line_no": 265
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 257,
+          "end": 266
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:SLAStandard",
+      "type": "ObjectType",
+      "name": "SLAStandard",
+      "aliases": [],
+      "attributes": {
+        "group": "4.4 活动与排期层",
+        "chinese_description": "标准SLA。表示标准活动工期。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "sla_id",
+            "description": "SLA ID",
+            "line_no": 272
+          },
+          {
+            "name": "template_id",
+            "description": "活动模板ID",
+            "line_no": 273
+          },
+          {
+            "name": "standard_duration",
+            "description": "标准时长",
+            "line_no": 274
+          },
+          {
+            "name": "duration_unit",
+            "description": "时长单位",
+            "line_no": 275
+          },
+          {
+            "name": "crew_capacity_assumption",
+            "description": "施工队能力假设",
+            "line_no": 276
+          },
+          {
+            "name": "scenario_tag",
+            "description": "场景标签",
+            "line_no": 277
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 267,
+          "end": 278
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ActivityInstance",
+      "type": "ObjectType",
+      "name": "ActivityInstance",
+      "aliases": [],
+      "attributes": {
+        "group": "4.4 活动与排期层",
+        "chinese_description": "活动实例。表示某个 PoD 在项目中的实际二级活动实例。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "activity_id",
+            "description": "活动实例ID",
+            "line_no": 284
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 285
+          },
+          {
+            "name": "pod_id",
+            "description": "所属PoD ID",
+            "line_no": 286
+          },
+          {
+            "name": "template_id",
+            "description": "活动模板ID",
+            "line_no": 287
+          },
+          {
+            "name": "l1_name",
+            "description": "一级活动名称",
+            "line_no": 288
+          },
+          {
+            "name": "l2_name",
+            "description": "二级活动名称",
+            "line_no": 289
+          },
+          {
+            "name": "activity_status",
+            "description": "活动状态",
+            "line_no": 290
+          },
+          {
+            "name": "planned_start_time",
+            "description": "计划开始时间",
+            "line_no": 291
+          },
+          {
+            "name": "planned_finish_time",
+            "description": "计划结束时间",
+            "line_no": 292
+          },
+          {
+            "name": "latest_start_time",
+            "description": "最晚开始时间",
+            "line_no": 293
+          },
+          {
+            "name": "latest_finish_time",
+            "description": "最晚结束时间",
+            "line_no": 294
+          },
+          {
+            "name": "actual_start_time",
+            "description": "实际开始时间",
+            "line_no": 295
+          },
+          {
+            "name": "actual_finish_time",
+            "description": "实际结束时间",
+            "line_no": 296
+          },
+          {
+            "name": "is_milestone_anchor",
+            "description": "是否为里程碑锚点",
+            "line_no": 297
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 279,
+          "end": 298
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:PoDSchedule",
+      "type": "ObjectType",
+      "name": "PoDSchedule",
+      "aliases": [],
+      "attributes": {
+        "group": "4.4 活动与排期层",
+        "chinese_description": "PoD排期。表示某个 PoD 的活动排期结果。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "pod_schedule_id",
+            "description": "PoD排期ID",
+            "line_no": 304
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 305
+          },
+          {
+            "name": "pod_id",
+            "description": "对应PoD ID",
+            "line_no": 306
+          },
+          {
+            "name": "anchor_activity_id",
+            "description": "锚点活动ID",
+            "line_no": 307
+          },
+          {
+            "name": "schedule_type",
+            "description": "排期类型",
+            "line_no": 308
+          },
+          {
+            "name": "generated_at",
+            "description": "生成时间",
+            "line_no": 309
+          },
+          {
+            "name": "is_feasible",
+            "description": "是否可执行",
+            "line_no": 310
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 299,
+          "end": 311
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:Crew",
+      "type": "ObjectType",
+      "name": "Crew",
+      "aliases": [],
+      "attributes": {
+        "group": "4.5 施工执行层",
+        "chinese_description": "施工队。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "crew_id",
+            "description": "施工队ID",
+            "line_no": 319
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 320
+          },
+          {
+            "name": "crew_status",
+            "description": "施工队状态",
+            "line_no": 321
+          },
+          {
+            "name": "daily_pod_capacity",
+            "description": "每日PoD安装能力",
+            "line_no": 322
+          },
+          {
+            "name": "parallel_limit",
+            "description": "并行上限",
+            "line_no": 323
+          }
+        ],
+        "status_values": [],
+        "rules": [
+          "每个施工队同一时间只能安装一个 PoD",
+          "每个施工队每天可安装的 PoD 数量采用固定规则"
+        ],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 314,
+          "end": 328
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:WorkAssignment",
+      "type": "ObjectType",
+      "name": "WorkAssignment",
+      "aliases": [],
+      "attributes": {
+        "group": "4.5 施工执行层",
+        "chinese_description": "施工分配。表示某个施工队在某个时间窗内被分配到哪个机房、安装哪个 PoD。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "assignment_id",
+            "description": "分配ID",
+            "line_no": 334
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 335
+          },
+          {
+            "name": "crew_id",
+            "description": "施工队ID",
+            "line_no": 336
+          },
+          {
+            "name": "pod_id",
+            "description": "PoD ID",
+            "line_no": 337
+          },
+          {
+            "name": "room_id",
+            "description": "机房ID",
+            "line_no": 338
+          },
+          {
+            "name": "position_id",
+            "description": "落位ID",
+            "line_no": 339
+          },
+          {
+            "name": "assignment_date",
+            "description": "分配日期",
+            "line_no": 340
+          },
+          {
+            "name": "start_time",
+            "description": "开始时间",
+            "line_no": 341
+          },
+          {
+            "name": "finish_time",
+            "description": "结束时间",
+            "line_no": 342
+          },
+          {
+            "name": "assignment_status",
+            "description": "分配状态",
+            "line_no": 343
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 329,
+          "end": 344
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:PlacementPlan",
+      "type": "ObjectType",
+      "name": "PlacementPlan",
+      "aliases": [],
+      "attributes": {
+        "group": "4.6 决策与解释层",
+        "chinese_description": "落位建议方案。表示 PoD 落位建议。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "placement_plan_id",
+            "description": "落位方案ID",
+            "line_no": 352
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 353
+          },
+          {
+            "name": "pod_id",
+            "description": "对应PoD ID",
+            "line_no": 354
+          },
+          {
+            "name": "building_id",
+            "description": "建议大楼ID",
+            "line_no": 355
+          },
+          {
+            "name": "floor_id",
+            "description": "建议楼层ID",
+            "line_no": 356
+          },
+          {
+            "name": "room_id",
+            "description": "建议机房ID",
+            "line_no": 357
+          },
+          {
+            "name": "position_id",
+            "description": "建议落位ID",
+            "line_no": 358
+          },
+          {
+            "name": "placement_score",
+            "description": "落位评分",
+            "line_no": 359
+          },
+          {
+            "name": "plan_status",
+            "description": "方案状态",
+            "line_no": 360
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 347,
+          "end": 361
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:ConstraintViolation",
+      "type": "ObjectType",
+      "name": "ConstraintViolation",
+      "aliases": [],
+      "attributes": {
+        "group": "4.6 决策与解释层",
+        "chinese_description": "约束冲突。表示当前方案不满足约束的原因。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "violation_id",
+            "description": "冲突ID",
+            "line_no": 367
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 368
+          },
+          {
+            "name": "object_type",
+            "description": "冲突对象类型",
+            "line_no": 369
+          },
+          {
+            "name": "object_id",
+            "description": "冲突对象ID",
+            "line_no": 370
+          },
+          {
+            "name": "violation_type",
+            "description": "冲突类型",
+            "line_no": 371
+          },
+          {
+            "name": "severity",
+            "description": "严重程度",
+            "line_no": 372
+          },
+          {
+            "name": "message",
+            "description": "说明信息",
+            "line_no": 373
+          },
+          {
+            "name": "related_milestone_id",
+            "description": "关联里程碑ID",
+            "line_no": 374
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [
+          {
+            "name": "MilestoneMissRisk",
+            "description": "里程碑失约风险",
+            "line_no": 377
+          },
+          {
+            "name": "ArrivalTooLate",
+            "description": "到货过晚",
+            "line_no": 378
+          },
+          {
+            "name": "ArrivalTooEarlyBacklog",
+            "description": "到货过早导致积压",
+            "line_no": 379
+          },
+          {
+            "name": "CrewCapacityExceeded",
+            "description": "施工队能力超限",
+            "line_no": 380
+          },
+          {
+            "name": "PositionUnavailable",
+            "description": "落位不可用",
+            "line_no": 381
+          },
+          {
+            "name": "DependencyUnsatisfied",
+            "description": "依赖未满足",
+            "line_no": 382
+          }
+        ],
+        "source_lines": {
+          "start": 362,
+          "end": 383
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "object_type:DecisionRecommendation",
+      "type": "ObjectType",
+      "name": "DecisionRecommendation",
+      "aliases": [],
+      "attributes": {
+        "group": "4.6 决策与解释层",
+        "chinese_description": "决策建议。表示 agent 输出的建议结果。",
+        "semantic_definition": null,
+        "key_properties": [
+          {
+            "name": "recommendation_id",
+            "description": "建议ID",
+            "line_no": 389
+          },
+          {
+            "name": "project_id",
+            "description": "所属项目ID",
+            "line_no": 390
+          },
+          {
+            "name": "recommendation_type",
+            "description": "建议类型",
+            "line_no": 391
+          },
+          {
+            "name": "target_object_type",
+            "description": "目标对象类型",
+            "line_no": 392
+          },
+          {
+            "name": "target_object_id",
+            "description": "目标对象ID",
+            "line_no": 393
+          },
+          {
+            "name": "recommendation_text",
+            "description": "建议内容",
+            "line_no": 394
+          },
+          {
+            "name": "confidence",
+            "description": "置信度",
+            "line_no": 395
+          },
+          {
+            "name": "created_at",
+            "description": "创建时间",
+            "line_no": 396
+          }
+        ],
+        "status_values": [],
+        "rules": [],
+        "notes": [],
+        "suggested_violation_types": [],
+        "source_lines": {
+          "start": 384,
+          "end": 399
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:waiting_install_duration",
+      "type": "DerivedMetric",
+      "name": "waiting_install_duration",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "待安装时长，等于实际安装开始时间减去实际到货时间",
+        "source_lines": {
+          "start": 487,
+          "end": 487
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:latest_safe_arrival_time",
+      "type": "DerivedMetric",
+      "name": "latest_safe_arrival_time",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "最晚安全到货时间",
+        "source_lines": {
+          "start": 488,
+          "end": 488
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:earliest_useful_arrival_time",
+      "type": "DerivedMetric",
+      "name": "earliest_useful_arrival_time",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "最早有意义到货时间",
+        "source_lines": {
+          "start": 489,
+          "end": 489
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:arrival_delay_duration",
+      "type": "DerivedMetric",
+      "name": "arrival_delay_duration",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "到货延迟时长",
+        "source_lines": {
+          "start": 490,
+          "end": 490
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:arrival_backlog_risk_level",
+      "type": "DerivedMetric",
+      "name": "arrival_backlog_risk_level",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "到货积压风险等级",
+        "source_lines": {
+          "start": 491,
+          "end": 491
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:room_handover_completed_pod_count",
+      "type": "DerivedMetric",
+      "name": "room_handover_completed_pod_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "机房已完成移交的PoD数量",
+        "source_lines": {
+          "start": 492,
+          "end": 492
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:room_handover_completion_rate",
+      "type": "DerivedMetric",
+      "name": "room_handover_completion_rate",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "机房移交完成率",
+        "source_lines": {
+          "start": 493,
+          "end": 493
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:room_milestone_gap_pod_count",
+      "type": "DerivedMetric",
+      "name": "room_milestone_gap_pod_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "机房里程碑差额PoD数量",
+        "source_lines": {
+          "start": 494,
+          "end": 494
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:floor_handover_completed_room_count",
+      "type": "DerivedMetric",
+      "name": "floor_handover_completed_room_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "楼层已完成移交的机房数量",
+        "source_lines": {
+          "start": 495,
+          "end": 495
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:floor_milestone_completion_rate",
+      "type": "DerivedMetric",
+      "name": "floor_milestone_completion_rate",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "楼层里程碑完成率",
+        "source_lines": {
+          "start": 496,
+          "end": 496
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:floor_milestone_gap_room_count",
+      "type": "DerivedMetric",
+      "name": "floor_milestone_gap_room_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "楼层里程碑差额机房数量",
+        "source_lines": {
+          "start": 497,
+          "end": 497
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:crew_daily_load",
+      "type": "DerivedMetric",
+      "name": "crew_daily_load",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "施工队日负载",
+        "source_lines": {
+          "start": 498,
+          "end": 498
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:crew_capacity_utilization",
+      "type": "DerivedMetric",
+      "name": "crew_capacity_utilization",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "施工队能力利用率",
+        "source_lines": {
+          "start": 499,
+          "end": 499
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:room_daily_install_count",
+      "type": "DerivedMetric",
+      "name": "room_daily_install_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "机房日安装PoD数量",
+        "source_lines": {
+          "start": 500,
+          "end": 500
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:floor_daily_install_count",
+      "type": "DerivedMetric",
+      "name": "floor_daily_install_count",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "楼层日安装PoD数量",
+        "source_lines": {
+          "start": 501,
+          "end": 501
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:schedule_feasibility_flag",
+      "type": "DerivedMetric",
+      "name": "schedule_feasibility_flag",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "排期可执行标记",
+        "source_lines": {
+          "start": 502,
+          "end": 502
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:placement_feasibility_flag",
+      "type": "DerivedMetric",
+      "name": "placement_feasibility_flag",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "落位可执行标记",
+        "source_lines": {
+          "start": 503,
+          "end": 503
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    },
+    {
+      "id": "derived_metric:milestone_risk_level",
+      "type": "DerivedMetric",
+      "name": "milestone_risk_level",
+      "aliases": [],
+      "attributes": {
+        "group": "6. 关键派生指标",
+        "description": "里程碑风险等级",
+        "source_lines": {
+          "start": 504,
+          "end": 504
+        }
+      },
+      "evidence": [],
+      "canonical_type": null,
+      "raw_type": null,
+      "type_aliases": []
+    }
+  ],
+  "edges": [
+    {
+      "source": "object_type:Project",
+      "target": "object_type:Building",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:Building",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.1 项目与空间关系",
+        "description": "项目包含大楼",
+        "source_lines": {
+          "start": 426,
+          "end": 426
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Building",
+      "target": "object_type:Floor",
+      "source_id": "object_type:Building",
+      "target_id": "object_type:Floor",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.1 项目与空间关系",
+        "description": "大楼包含楼层",
+        "source_lines": {
+          "start": 427,
+          "end": 427
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Floor",
+      "target": "object_type:Room",
+      "source_id": "object_type:Floor",
+      "target_id": "object_type:Room",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.1 项目与空间关系",
+        "description": "楼层包含机房",
+        "source_lines": {
+          "start": 428,
+          "end": 428
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Room",
+      "target": "object_type:PoDPosition",
+      "source_id": "object_type:Room",
+      "target_id": "object_type:PoDPosition",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.1 项目与空间关系",
+        "description": "机房包含PoD落位",
+        "source_lines": {
+          "start": 429,
+          "end": 429
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Project",
+      "target": "object_type:RoomMilestone",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:RoomMilestone",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.2 项目与里程碑关系",
+        "description": "项目包含机房里程碑",
+        "source_lines": {
+          "start": 433,
+          "end": 433
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Project",
+      "target": "object_type:FloorMilestone",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:FloorMilestone",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.2 项目与里程碑关系",
+        "description": "项目包含楼层里程碑",
+        "source_lines": {
+          "start": 434,
+          "end": 434
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:RoomMilestone",
+      "target": "object_type:Room",
+      "source_id": "object_type:RoomMilestone",
+      "target_id": "object_type:Room",
+      "relation": "CONSTRAINS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.2 项目与里程碑关系",
+        "description": "机房里程碑约束机房",
+        "source_lines": {
+          "start": 435,
+          "end": 435
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:FloorMilestone",
+      "target": "object_type:Floor",
+      "source_id": "object_type:FloorMilestone",
+      "target_id": "object_type:Floor",
+      "relation": "CONSTRAINS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.2 项目与里程碑关系",
+        "description": "楼层里程碑约束楼层",
+        "source_lines": {
+          "start": 436,
+          "end": 436
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:FloorMilestone",
+      "target": "object_type:RoomMilestone",
+      "source_id": "object_type:FloorMilestone",
+      "target_id": "object_type:RoomMilestone",
+      "relation": "AGGREGATES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.2 项目与里程碑关系",
+        "description": "楼层里程碑聚合机房里程碑",
+        "source_lines": {
+          "start": 437,
+          "end": 437
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Project",
+      "target": "object_type:PoD",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:PoD",
+      "relation": "DELIVERS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.3 项目与 PoD 关系",
+        "description": "项目交付PoD",
+        "source_lines": {
+          "start": 441,
+          "end": 441
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:Building",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:Building",
+      "relation": "ASSIGNED_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.3 项目与 PoD 关系",
+        "description": "PoD分配到大楼",
+        "source_lines": {
+          "start": 442,
+          "end": 442
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:Floor",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:Floor",
+      "relation": "ASSIGNED_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.3 项目与 PoD 关系",
+        "description": "PoD分配到楼层",
+        "source_lines": {
+          "start": 443,
+          "end": 443
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:Room",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:Room",
+      "relation": "ASSIGNED_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.3 项目与 PoD 关系",
+        "description": "PoD分配到机房",
+        "source_lines": {
+          "start": 444,
+          "end": 444
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:PoDPosition",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:PoDPosition",
+      "relation": "ASSIGNED_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.3 项目与 PoD 关系",
+        "description": "PoD分配到落位",
+        "source_lines": {
+          "start": 445,
+          "end": 445
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Project",
+      "target": "object_type:Shipment",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:Shipment",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.4 PoD 与物流关系",
+        "description": "项目包含发货单",
+        "source_lines": {
+          "start": 449,
+          "end": 449
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Shipment",
+      "target": "object_type:PoD",
+      "source_id": "object_type:Shipment",
+      "target_id": "object_type:PoD",
+      "relation": "SHIPS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.4 PoD 与物流关系",
+        "description": "发货单运输PoD",
+        "source_lines": {
+          "start": 450,
+          "end": 450
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:ArrivalEvent",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:ArrivalEvent",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.4 PoD 与物流关系",
+        "description": "PoD具有到货事件",
+        "source_lines": {
+          "start": 451,
+          "end": 451
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ArrivalPlan",
+      "target": "object_type:PoD",
+      "source_id": "object_type:ArrivalPlan",
+      "target_id": "object_type:PoD",
+      "relation": "APPLIES_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.4 PoD 与物流关系",
+        "description": "到货方案作用于PoD",
+        "source_lines": {
+          "start": 452,
+          "end": 452
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoD",
+      "target": "object_type:ActivityInstance",
+      "source_id": "object_type:PoD",
+      "target_id": "object_type:ActivityInstance",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "PoD具有活动实例",
+        "source_lines": {
+          "start": 456,
+          "end": 456
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ActivityTemplate",
+      "target": "object_type:ActivityInstance",
+      "source_id": "object_type:ActivityTemplate",
+      "target_id": "object_type:ActivityInstance",
+      "relation": "GENERATES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "活动模板生成活动实例",
+        "source_lines": {
+          "start": 457,
+          "end": 457
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ActivityInstance",
+      "target": "object_type:SLAStandard",
+      "source_id": "object_type:ActivityInstance",
+      "target_id": "object_type:SLAStandard",
+      "relation": "USES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "活动实例使用标准SLA",
+        "source_lines": {
+          "start": 458,
+          "end": 458
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ActivityInstance",
+      "target": "object_type:ActivityInstance",
+      "source_id": "object_type:ActivityInstance",
+      "target_id": "object_type:ActivityInstance",
+      "relation": "DEPENDS_ON",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "活动实例依赖活动实例",
+        "source_lines": {
+          "start": 459,
+          "end": 459
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ActivityDependencyTemplate",
+      "target": "object_type:ActivityInstance",
+      "source_id": "object_type:ActivityDependencyTemplate",
+      "target_id": "object_type:ActivityInstance",
+      "relation": "DEFINES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "活动依赖模板定义活动实例关系",
+        "source_lines": {
+          "start": 460,
+          "end": 460
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoDSchedule",
+      "target": "object_type:ActivityInstance",
+      "source_id": "object_type:PoDSchedule",
+      "target_id": "object_type:ActivityInstance",
+      "relation": "CONTAINS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "PoD排期包含活动实例",
+        "source_lines": {
+          "start": 461,
+          "end": 461
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PoDSchedule",
+      "target": "object_type:PoD",
+      "source_id": "object_type:PoDSchedule",
+      "target_id": "object_type:PoD",
+      "relation": "APPLIES_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.5 PoD 与活动关系",
+        "description": "PoD排期作用于PoD",
+        "source_lines": {
+          "start": 462,
+          "end": 462
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Project",
+      "target": "object_type:Crew",
+      "source_id": "object_type:Project",
+      "target_id": "object_type:Crew",
+      "relation": "HAS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.6 施工执行关系",
+        "description": "项目包含施工队",
+        "source_lines": {
+          "start": 466,
+          "end": 466
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:Crew",
+      "target": "object_type:WorkAssignment",
+      "source_id": "object_type:Crew",
+      "target_id": "object_type:WorkAssignment",
+      "relation": "EXECUTES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.6 施工执行关系",
+        "description": "施工队执行施工分配",
+        "source_lines": {
+          "start": 467,
+          "end": 467
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:WorkAssignment",
+      "target": "object_type:PoD",
+      "source_id": "object_type:WorkAssignment",
+      "target_id": "object_type:PoD",
+      "relation": "ASSIGNS",
+      "evidence": [],
+      "attributes": {
+        "group": "5.6 施工执行关系",
+        "description": "施工分配指向PoD",
+        "source_lines": {
+          "start": 468,
+          "end": 468
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:WorkAssignment",
+      "target": "object_type:Room",
+      "source_id": "object_type:WorkAssignment",
+      "target_id": "object_type:Room",
+      "relation": "OCCURS_IN",
+      "evidence": [],
+      "attributes": {
+        "group": "5.6 施工执行关系",
+        "description": "施工分配发生在机房",
+        "source_lines": {
+          "start": 469,
+          "end": 469
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:WorkAssignment",
+      "target": "object_type:PoDPosition",
+      "source_id": "object_type:WorkAssignment",
+      "target_id": "object_type:PoDPosition",
+      "relation": "OCCURS_AT",
+      "evidence": [],
+      "attributes": {
+        "group": "5.6 施工执行关系",
+        "description": "施工分配发生在落位",
+        "source_lines": {
+          "start": 470,
+          "end": 470
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PlacementPlan",
+      "target": "object_type:PoD",
+      "source_id": "object_type:PlacementPlan",
+      "target_id": "object_type:PoD",
+      "relation": "APPLIES_TO",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "落位方案作用于PoD",
+        "source_lines": {
+          "start": 474,
+          "end": 474
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:PlacementPlan",
+      "target": "object_type:PoDPosition",
+      "source_id": "object_type:PlacementPlan",
+      "target_id": "object_type:PoDPosition",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "落位方案引用落位",
+        "source_lines": {
+          "start": 475,
+          "end": 475
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ConstraintViolation",
+      "target": "object_type:PoD",
+      "source_id": "object_type:ConstraintViolation",
+      "target_id": "object_type:PoD",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "约束冲突关联PoD",
+        "source_lines": {
+          "start": 476,
+          "end": 476
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ConstraintViolation",
+      "target": "object_type:RoomMilestone",
+      "source_id": "object_type:ConstraintViolation",
+      "target_id": "object_type:RoomMilestone",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "约束冲突关联机房里程碑",
+        "source_lines": {
+          "start": 477,
+          "end": 477
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:ConstraintViolation",
+      "target": "object_type:FloorMilestone",
+      "source_id": "object_type:ConstraintViolation",
+      "target_id": "object_type:FloorMilestone",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "约束冲突关联楼层里程碑",
+        "source_lines": {
+          "start": 478,
+          "end": 478
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:DecisionRecommendation",
+      "target": "object_type:ArrivalPlan",
+      "source_id": "object_type:DecisionRecommendation",
+      "target_id": "object_type:ArrivalPlan",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "决策建议引用到货方案",
+        "source_lines": {
+          "start": 479,
+          "end": 479
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:DecisionRecommendation",
+      "target": "object_type:PlacementPlan",
+      "source_id": "object_type:DecisionRecommendation",
+      "target_id": "object_type:PlacementPlan",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "决策建议引用落位方案",
+        "source_lines": {
+          "start": 480,
+          "end": 480
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    },
+    {
+      "source": "object_type:DecisionRecommendation",
+      "target": "object_type:ConstraintViolation",
+      "source_id": "object_type:DecisionRecommendation",
+      "target_id": "object_type:ConstraintViolation",
+      "relation": "REFERENCES",
+      "evidence": [],
+      "attributes": {
+        "group": "5.7 决策与解释关系",
+        "description": "决策建议引用约束冲突",
+        "source_lines": {
+          "start": 481,
+          "end": 481
+        }
+      },
+      "canonical_relation": null,
+      "raw_relation": null,
+      "relation_aliases": []
+    }
+  ]
+}
