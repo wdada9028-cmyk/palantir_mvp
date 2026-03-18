@@ -104,7 +104,9 @@ def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive
     .legend-row:last-child { border-bottom: none; }
     .legend-en { font-weight: 700; color: #1d4ed8; }
     .legend-zh { color: #475569; text-align: right; }
-    .floating-detail-card { position: absolute; min-width: 320px; max-width: 380px; max-height: calc(100% - 48px); overflow: auto; right: auto; top: auto; z-index: 12; background: rgba(255,255,255,0.97); border: 1px solid #dbe3f0; border-radius: 18px; box-shadow: 0 20px 44px rgba(15,23,42,0.18); padding: 14px; backdrop-filter: blur(10px); }
+    .floating-detail-card { position: absolute; min-width: 220px; max-width: 280px; max-height: calc(100% - 48px); overflow: auto; right: auto; top: auto; z-index: 12; background: rgba(255,255,255,0.97); border: 1px solid #dbe3f0; border-radius: 18px; box-shadow: 0 20px 44px rgba(15,23,42,0.18); padding: 12px; backdrop-filter: blur(10px); font-size: 12px; }
+    .graph-stage.filtering-active .legend-card { opacity: 0.72; }
+    .trace-reset-button { position: absolute; top: 18px; right: 18px; z-index: 13; border: none; border-radius: 999px; padding: 8px 12px; font-size: 12px; font-weight: 700; background: rgba(15,23,42,0.88); color: white; cursor: pointer; box-shadow: 0 12px 28px rgba(15,23,42,0.22); }
     .floating-empty { color: #64748b; line-height: 1.5; }
     .hero-card { border-radius: 18px; padding: 18px; background: linear-gradient(135deg, #1d4ed8, #7c3aed); color: white; box-shadow: 0 18px 34px rgba(37,99,235,0.24); margin-bottom: 14px; }
     .hero-title { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
@@ -157,6 +159,7 @@ def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive
         __RELATION_LEGEND__
       </div>
       <div id="floating-detail-card" class="floating-detail-card hidden">__DEFAULT_PANEL__</div>
+      <button id="trace-reset-button" class="trace-reset-button hidden">Reset focus</button>
       <button id="qa-assistant-toggle" class="qa-assistant-toggle">智能问答助手</button>
       <section id="qa-answer-panel" class="qa-answer-panel hidden">
         <div class="qa-title">智能问答助手</div>
@@ -174,7 +177,9 @@ window.cytoscape = window.cytoscape || cytoscape;
   <script>
     const graphPayload = __PAYLOAD__;
     const relationFilter = document.getElementById('relation-filter');
+    const graphStage = document.querySelector('.graph-stage');
     const floatingDetailCard = document.getElementById('floating-detail-card');
+    const traceResetButton = document.getElementById('trace-reset-button');
     const searchInput = document.getElementById('node-search');
     const searchButton = document.getElementById('search-button');
     const resetButton = document.getElementById('reset-view');
@@ -383,6 +388,45 @@ window.cytoscape = window.cytoscape || cytoscape;
       controller.timers = [];
     }
 
+    function showTraceResetButton() {
+      traceResetButton.classList.remove('hidden');
+    }
+
+    function hideTraceResetButton() {
+      traceResetButton.classList.add('hidden');
+    }
+
+    function setFilteringState(active) {
+      graphStage.classList.toggle('filtering-active', Boolean(active));
+      if (active) {
+        showTraceResetButton();
+        return;
+      }
+      hideTraceResetButton();
+    }
+
+    function resetToExplorationMode(options = {}) {
+      const shouldFit = options.fit !== false;
+      const shouldResetInputs = options.resetInputs !== false;
+      clearTraceClasses();
+      cy.elements().removeClass('highlighted');
+      cy.elements().removeClass('dimmed');
+      if (playbackController) {
+        playbackController.currentSnapshot = null;
+      }
+      if (shouldResetInputs) {
+        relationFilter.value = 'all';
+        searchInput.value = '';
+        toggleMetricNodes(false);
+        applyRelationFilter();
+      }
+      hideInlineDetailCard();
+      setFilteringState(false);
+      if (shouldFit) {
+        cy.fit(cy.elements(':visible'), 70);
+      }
+    }
+
     function clearQaPresentation() {
       setQaStatus('\\u7b49\\u5f85\\u63d0\\u95ee');
       qaAnswerCard.classList.add('hidden');
@@ -393,11 +437,13 @@ window.cytoscape = window.cytoscape || cytoscape;
       persistedEvidenceMap = new Map();
       evidenceSnapshots = new Map();
       clearTraceClasses();
+      setFilteringState(false);
       clearPlaybackTimers(playbackController);
       if (playbackController) {
         playbackController.queue = [];
         playbackController.running = false;
         playbackController.traceProtocolSeen = false;
+        playbackController.currentSnapshot = null;
       }
     }
 
@@ -423,11 +469,16 @@ window.cytoscape = window.cytoscape || cytoscape;
     function replayFromSnapshot(snapshot, options = {}) {
       const normalized = normalizeSnapshot(snapshot || {});
       clearTraceClasses();
+      if (playbackController) {
+        playbackController.currentSnapshot = normalized;
+      }
       const collection = buildFocusCollection(normalized.node_ids, normalized.edge_ids);
       if (!collection.length) {
+        setFilteringState(false);
         cy.elements(':visible').removeClass('trace-dimmed');
         return normalized;
       }
+      setFilteringState(true);
       cy.elements(':visible').addClass('trace-dimmed');
       collection.removeClass('trace-dimmed');
       collection.addClass('trace-path');
@@ -542,6 +593,7 @@ window.cytoscape = window.cytoscape || cytoscape;
         this.running = false;
         this.timers = [];
         this.traceProtocolSeen = false;
+        this.currentSnapshot = null;
       }
 
       enqueue(eventType, payload) {
@@ -752,9 +804,16 @@ window.cytoscape = window.cytoscape || cytoscape;
       cy.elements().removeClass('highlighted');
       cy.elements().removeClass('dimmed');
       const neighborhood = node.closedNeighborhood();
+      if (playbackController) {
+        playbackController.currentSnapshot = normalizeSnapshot({
+          node_ids: neighborhood.nodes().map(item => item.id()),
+          edge_ids: neighborhood.edges().map(item => item.id()),
+        });
+      }
       cy.elements(':visible').addClass('dimmed');
       neighborhood.removeClass('dimmed');
       neighborhood.addClass('highlighted');
+      setFilteringState(true);
       cy.fit(neighborhood, 90);
     }
 
@@ -773,9 +832,7 @@ window.cytoscape = window.cytoscape || cytoscape;
 
     cy.on('tap', event => {
       if (event.target === cy) {
-        cy.elements().removeClass('highlighted');
-        cy.elements().removeClass('dimmed');
-        hideInlineDetailCard();
+        resetToExplorationMode({ fit: false, resetInputs: false });
       }
     });
 
@@ -808,19 +865,16 @@ window.cytoscape = window.cytoscape || cytoscape;
       cy.fit(cy.elements(':visible'), 70);
     });
 
+    traceResetButton.addEventListener('click', () => {
+      resetToExplorationMode({ fit: false, resetInputs: false });
+    });
+
     resetButton.addEventListener('click', () => {
-      relationFilter.value = 'all';
-      searchInput.value = '';
-      cy.elements().removeClass('highlighted');
-      cy.elements().removeClass('dimmed');
       if (qaEventSource) {
         qaEventSource.close();
         qaEventSource = null;
       }
-      toggleMetricNodes(false);
-      applyRelationFilter();
-      hideInlineDetailCard();
-      cy.fit(cy.elements(':visible'), 70);
+      resetToExplorationMode();
     });
 
     qaAssistantToggle.addEventListener('click', () => {

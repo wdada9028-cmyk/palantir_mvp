@@ -193,3 +193,17 @@ def test_exported_html_contains_trace_playback_controller_and_timeline(tmp_path:
     assert 'trace_anchor' in text
     assert 'trace_expand' in text
     assert 'evidence_final' in text
+
+
+def test_exported_html_contains_trace_reset_mode_controls(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology v2'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'filtering-active' in text
+    assert 'resetToExplorationMode' in text
+    assert 'trace-reset-button' in text
+    assert 'currentSnapshot' in text
+    assert 'event.target === cy' in text
+    assert 'max-width: 280px' in text
+    assert 'font-size: 12px' in text
