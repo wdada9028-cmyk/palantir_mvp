@@ -1,16 +1,53 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 from collections import defaultdict
 
 from ..models.ontology import OntologyGraph, OntologyObject, OntologyRelation
+from .intent_resolver import IntentResolution, resolve_intent
 from .ontology_query_models import EvidenceItem, OntologyEvidenceBundle, RetrievalStep, SearchTrace, TraceExpansionStep
 
 _RUNTIME_HINTS = {
-    '宕机', '离线', '在线', '实时', '状态', '当前', '现在', '今天', '昨天', '最近',
-    '实例', '服务器', '机柜', 'cpu', 'memory', 'usage', '利用率', '延迟', '告警',
+    '宕机',
+    '离线',
+    '在线',
+    '实时',
+    '状态',
+    '当前',
+    '现在',
+    '今天',
+    '昨天',
+    '最近',
+    '实例',
+    '服务器',
+    '机器',
+    'cpu',
+    'memory',
+    'usage',
+    '利用率',
+    '延迟',
+    '告警',
 }
 _RELATION_WORDS = {'关系', '关联', '依赖', '上下游', '影响', '链接'}
+_RELATION_TRANSLATIONS = {
+    'HAS': '包含',
+    'AGGREGATES': '聚合',
+    'APPLIES_TO': '作用于',
+    'ASSIGNED_TO': '分配给',
+    'ASSIGNS': '指派给',
+    'CONSTRAINS': '约束',
+    'CONTAINS': '包含',
+    'DEFINES': '定义',
+    'DELIVERS': '交付',
+    'DEPENDS_ON': '依赖',
+    'EXECUTES': '执行',
+    'GENERATES': '生成',
+    'OCCURS_AT': '发生于位置',
+    'OCCURS_IN': '发生于设备',
+    'REFERENCES': '引用',
+    'SHIPS': '运输',
+    'USES': '使用',
+}
 
 
 def retrieve_ontology_evidence(graph: OntologyGraph, question: str) -> OntologyEvidenceBundle:
@@ -29,17 +66,22 @@ def retrieve_ontology_evidence(graph: OntologyGraph, question: str) -> OntologyE
     relation_matches: list[tuple[int, str, OntologyRelation, list[str]]] = []
     for index, relation in enumerate(graph.relations, start=1):
         score, reasons = _score_relation(relation, normalized_question, tokens)
-        if score > 0:
-            edge_id = _edge_id(index)
-            relation_matches.append((score, edge_id, relation, reasons))
-            node_scores.setdefault(relation.source_id, 0)
-            node_scores[relation.source_id] += max(score // 2, 1)
-            node_reasons[relation.source_id].append(f'命中关系 {relation.relation} 的关联节点')
-            node_scores.setdefault(relation.target_id, 0)
-            node_scores[relation.target_id] += max(score // 2, 1)
-            node_reasons[relation.target_id].append(f'命中关系 {relation.relation} 的关联节点')
+        if score <= 0:
+            continue
+        edge_id = _edge_id(index)
+        relation_matches.append((score, edge_id, relation, reasons))
+        node_scores.setdefault(relation.source_id, 0)
+        node_scores[relation.source_id] += max(score // 2, 1)
+        node_reasons[relation.source_id].append(f'命中关系 {relation.relation} 的关联节点')
+        node_scores.setdefault(relation.target_id, 0)
+        node_scores[relation.target_id] += max(score // 2, 1)
+        node_reasons[relation.target_id].append(f'命中关系 {relation.relation} 的关联节点')
 
-    seed_node_ids = _select_seed_node_ids(node_scores)
+    intent_resolution = resolve_intent(graph, question)
+    seed_node_ids = list(intent_resolution.seeds) if intent_resolution.seeds else _select_seed_node_ids(node_scores)
+    display_name_map = _build_display_name_map(graph)
+    relation_name_map = _build_relation_name_map(graph)
+
     matched_node_ids = list(seed_node_ids)
     matched_edge_ids: list[str] = []
     evidence_chain: list[EvidenceItem] = []
@@ -61,48 +103,49 @@ def retrieve_ontology_evidence(graph: OntologyGraph, question: str) -> OntologyE
                 evidence_id=evidence_id,
                 kind='seed',
                 label=obj.name,
-                message=f'问题命中了实体 {obj.name}',
+                message=f'问题命中了实体 {display_name_map.get(obj.id, obj.name)}',
                 node_ids=[obj.id],
-                why_matched=_dedupe_preserve_order(node_reasons.get(obj.id) or ['实体名称匹配']),
+                why_matched=_seed_match_reasons(node_reasons.get(obj.id), intent_resolution),
             )
         )
 
     relation_reason_map = {edge_id: reasons for _, edge_id, _, reasons in relation_matches}
     for index, relation in enumerate(graph.relations, start=1):
         edge_id = _edge_id(index)
-        if relation.source_id in seed_node_ids or relation.target_id in seed_node_ids:
-            matched_edge_ids.append(edge_id)
-            matched_node_ids.extend([relation.source_id, relation.target_id])
-            trace_snapshot_node_ids.extend([relation.source_id, relation.target_id])
-            trace_snapshot_edge_ids.append(edge_id)
-            reason_lines = _dedupe_preserve_order(relation_reason_map.get(edge_id) or ['关系邻接扩展'])
-            expansion_steps.append(
-                TraceExpansionStep(
-                    step=len(expansion_steps) + 1,
-                    from_node_id=relation.source_id,
-                    edge_id=edge_id,
-                    to_node_id=relation.target_id,
-                    relation=relation.relation,
-                    reason='；'.join(reason_lines),
-                    snapshot_node_ids=_dedupe_preserve_order(list(trace_snapshot_node_ids)),
-                    snapshot_edge_ids=_dedupe_preserve_order(list(trace_snapshot_edge_ids)),
-                )
+        if relation.source_id not in seed_node_ids and relation.target_id not in seed_node_ids:
+            continue
+        matched_edge_ids.append(edge_id)
+        matched_node_ids.extend([relation.source_id, relation.target_id])
+        trace_snapshot_node_ids.extend([relation.source_id, relation.target_id])
+        trace_snapshot_edge_ids.append(edge_id)
+        reason_lines = _dedupe_preserve_order(relation_reason_map.get(edge_id) or ['关系邻接扩展'])
+        expansion_steps.append(
+            TraceExpansionStep(
+                step=len(expansion_steps) + 1,
+                from_node_id=relation.source_id,
+                edge_id=edge_id,
+                to_node_id=relation.target_id,
+                relation=relation.relation,
+                reason='；'.join(reason_lines),
+                snapshot_node_ids=_dedupe_preserve_order(list(trace_snapshot_node_ids)),
+                snapshot_edge_ids=_dedupe_preserve_order(list(trace_snapshot_edge_ids)),
             )
-            evidence_id = _evidence_id(evidence_counter)
-            evidence_counter += 1
-            evidence_ids_for_steps.append(evidence_id)
-            label = f'{_object_label(graph, relation.source_id)} {relation.relation} {_object_label(graph, relation.target_id)}'
-            evidence_chain.append(
-                EvidenceItem(
-                    evidence_id=evidence_id,
-                    kind='relation',
-                    label=label,
-                    message=str(relation.attributes.get('description', '') or label),
-                    node_ids=[relation.source_id, relation.target_id],
-                    edge_ids=[edge_id],
-                    why_matched=reason_lines,
-                )
+        )
+        evidence_id = _evidence_id(evidence_counter)
+        evidence_counter += 1
+        evidence_ids_for_steps.append(evidence_id)
+        label = f'{_object_label(graph, relation.source_id)} {relation.relation} {_object_label(graph, relation.target_id)}'
+        evidence_chain.append(
+            EvidenceItem(
+                evidence_id=evidence_id,
+                kind='relation',
+                label=label,
+                message=str(relation.attributes.get('description', '') or label),
+                node_ids=[relation.source_id, relation.target_id],
+                edge_ids=[edge_id],
+                why_matched=reason_lines,
             )
+        )
 
     matched_node_ids = _dedupe_preserve_order(matched_node_ids)
     matched_edge_ids = _dedupe_preserve_order(matched_edge_ids)
@@ -172,8 +215,13 @@ def retrieve_ontology_evidence(graph: OntologyGraph, question: str) -> OntologyE
         insufficient_evidence=insufficient_evidence,
         search_trace=SearchTrace(
             seed_node_ids=list(seed_node_ids),
+            seed_resolution_source=intent_resolution.source,
+            seed_resolution_reasoning=intent_resolution.reasoning,
+            seed_resolution_error=intent_resolution.error,
             expansion_steps=expansion_steps,
         ),
+        display_name_map=display_name_map,
+        relation_name_map=relation_name_map,
     )
 
 
@@ -249,6 +297,35 @@ def _score_relation(relation: OntologyRelation, normalized_question: str, tokens
     return score, _dedupe_preserve_order(reasons)
 
 
+def _build_display_name_map(graph: OntologyGraph) -> dict[str, str]:
+    display_name_map: dict[str, str] = {}
+    for object_id, obj in graph.objects.items():
+        english_name = str(obj.name or object_id.split(':', 1)[-1]).strip() or object_id
+        chinese_name = str(obj.attributes.get('chinese_description', '') or '').strip()
+        if chinese_name and chinese_name != english_name:
+            display_name_map[object_id] = f'{chinese_name}({english_name})'
+        else:
+            display_name_map[object_id] = english_name
+    return display_name_map
+
+
+def _build_relation_name_map(graph: OntologyGraph) -> dict[str, str]:
+    relation_name_map: dict[str, str] = {}
+    for relation in graph.relations:
+        relation_name_map[relation.relation] = _RELATION_TRANSLATIONS.get(relation.relation, relation.relation)
+    return relation_name_map
+
+
+def _seed_match_reasons(existing_reasons: list[str] | None, intent_resolution: IntentResolution) -> list[str]:
+    if existing_reasons:
+        return _dedupe_preserve_order(existing_reasons)
+    if intent_resolution.source == 'llm':
+        if intent_resolution.reasoning:
+            return [intent_resolution.reasoning]
+        return ['语义意图解析命中']
+    return ['实体名称匹配']
+
+
 def _normalize_text(value: object) -> str:
     return re.sub(r'\s+', ' ', str(value or '').strip().lower())
 
@@ -269,10 +346,10 @@ def _named_item_texts(values: object) -> list[str]:
             joined = ' '.join(part for part in (name, description) if part)
             if joined:
                 texts.append(joined)
-        else:
-            text = str(item or '').strip()
-            if text:
-                texts.append(text)
+            continue
+        text = str(item or '').strip()
+        if text:
+            texts.append(text)
     return texts
 
 
