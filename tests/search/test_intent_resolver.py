@@ -1,5 +1,5 @@
 ﻿from cloud_delivery_ontology_palantir.models.ontology import OntologyGraph, OntologyObject
-from cloud_delivery_ontology_palantir.search.intent_resolver import resolve_intent
+from cloud_delivery_ontology_palantir.search.intent_resolver import _build_prompt, resolve_intent
 
 
 def _build_graph() -> OntologyGraph:
@@ -154,3 +154,21 @@ def test_resolve_intent_filters_unknown_seed_ids(monkeypatch):
     assert result.seeds == ['object_type:PoDPosition']
     assert result.source == 'llm'
     assert result.error == ''
+
+
+def test_build_prompt_uses_minimal_deduped_schema_summary(monkeypatch):
+    graph = _build_graph()
+    arrival_plan = graph.get_object('object_type:ArrivalPlan')
+    assert arrival_plan is not None
+
+    monkeypatch.setattr(
+        'cloud_delivery_ontology_palantir.search.intent_resolver._iter_prompt_objects',
+        lambda graph: [arrival_plan, arrival_plan],
+    )
+
+    prompt = _build_prompt(graph, '到货计划是什么')
+
+    assert prompt.count('id=object_type:ArrivalPlan; chinese_description=到货计划') == 1
+    assert 'name=' not in prompt
+    assert 'aliases=' not in prompt
+    assert 'group=' not in prompt

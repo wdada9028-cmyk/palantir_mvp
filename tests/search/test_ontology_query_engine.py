@@ -3,6 +3,27 @@ from cloud_delivery_ontology_palantir.search.intent_resolver import IntentResolu
 from cloud_delivery_ontology_palantir.search.ontology_query_engine import retrieve_ontology_evidence
 
 
+_ALL_RELATIONS = {
+    'AGGREGATES': '聚合',
+    'APPLIES_TO': '作用于',
+    'ASSIGNED_TO': '分配给',
+    'ASSIGNS': '指派给',
+    'CONSTRAINS': '约束',
+    'CONTAINS': '包含',
+    'DEFINES': '定义',
+    'DELIVERS': '交付',
+    'DEPENDS_ON': '依赖',
+    'EXECUTES': '执行',
+    'GENERATES': '生成',
+    'HAS': '包含',
+    'OCCURS_AT': '发生于位置',
+    'OCCURS_IN': '发生于机房',
+    'REFERENCES': '引用',
+    'SHIPS': '运输',
+    'USES': '使用',
+}
+
+
 def build_test_graph() -> OntologyGraph:
     graph = OntologyGraph(metadata={"title": "测试"})
     graph.add_object(
@@ -166,3 +187,35 @@ def test_retrieve_ontology_evidence_builds_localized_display_maps(monkeypatch):
     assert result.display_name_map['object_type:ArrivalPlan'] == '到货计划(ArrivalPlan)'
     assert result.display_name_map['object_type:PoDPosition'] == '泊位(PoDPosition)'
     assert result.relation_name_map['REFERENCES'] == '引用'
+
+
+def test_retrieve_ontology_evidence_relation_name_map_covers_current_ontology_relations():
+    graph = OntologyGraph(metadata={'title': 'relations'})
+    graph.add_object(
+        OntologyObject(
+            id='object_type:Left',
+            type='ObjectType',
+            name='Left',
+            attributes={'chinese_description': '左实体'},
+        )
+    )
+    graph.add_object(
+        OntologyObject(
+            id='object_type:Right',
+            type='ObjectType',
+            name='Right',
+            attributes={'chinese_description': '右实体'},
+        )
+    )
+    for relation_code in _ALL_RELATIONS:
+        graph.add_relation(
+            OntologyRelation(
+                source_id='object_type:Left',
+                target_id='object_type:Right',
+                relation=relation_code,
+            )
+        )
+
+    result = retrieve_ontology_evidence(graph, '左实体')
+
+    assert result.relation_name_map == _ALL_RELATIONS

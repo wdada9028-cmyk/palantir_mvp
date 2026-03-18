@@ -124,20 +124,7 @@ def _load_config() -> _IntentResolverConfig | None:
 
 
 def _build_prompt(graph: OntologyGraph, query: str) -> str:
-    ontology_lines = []
-    for obj in _iter_prompt_objects(graph):
-        chinese_description = str(obj.attributes.get('chinese_description', '') or '').strip()
-        group = str(obj.attributes.get('group', '') or '').strip()
-        aliases = ', '.join(alias for alias in obj.aliases if alias)
-        segments = [f'id={obj.id}', f'name={obj.name}']
-        if aliases:
-            segments.append(f'aliases={aliases}')
-        if chinese_description:
-            segments.append(f'chinese_description={chinese_description}')
-        if group:
-            segments.append(f'group={group}')
-        ontology_lines.append('; '.join(segments))
-    ontology_text = '\n'.join(ontology_lines)
+    ontology_text = _build_schema_summary(graph)
     return (
         f'User question: {query}\n\n'
         'Ontology entities:\n'
@@ -145,6 +132,16 @@ def _build_prompt(graph: OntologyGraph, query: str) -> str:
         'Return JSON only, in the form {"seeds": ["object_type:Example"], "reasoning": "short reason"}.\n'
         'Only use IDs from the ontology entities list. If there is no match, return an empty seeds list.'
     )
+
+
+def _build_schema_summary(graph: OntologyGraph) -> str:
+    lines: list[str] = []
+    for obj in _iter_prompt_objects(graph):
+        description = str(obj.attributes.get('chinese_description', '') or '').strip()
+        if not description:
+            description = str(obj.name or obj.id.split(':', 1)[-1]).strip() or obj.id
+        lines.append(f'id={obj.id}; chinese_description={description}')
+    return '\n'.join(_dedupe_preserve_order(lines))
 
 
 def _iter_prompt_objects(graph: OntologyGraph) -> list[OntologyObject]:

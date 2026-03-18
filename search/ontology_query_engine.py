@@ -43,7 +43,7 @@ _RELATION_TRANSLATIONS = {
     'EXECUTES': '执行',
     'GENERATES': '生成',
     'OCCURS_AT': '发生于位置',
-    'OCCURS_IN': '发生于设备',
+    'OCCURS_IN': '发生于机房',
     'REFERENCES': '引用',
     'SHIPS': '运输',
     'USES': '使用',
@@ -385,3 +385,4 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
 
 def _looks_like_runtime_question(normalized_question: str) -> bool:
     return any(hint in normalized_question for hint in _RUNTIME_HINTS)
+
