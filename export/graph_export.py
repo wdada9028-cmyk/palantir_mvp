@@ -200,6 +200,8 @@ window.cytoscape = window.cytoscape || cytoscape;
     let persistedEvidenceMap = new Map();
     let evidenceSnapshots = new Map();
     let playbackController = null;
+    let activeDetailNode = null;
+    let detailCardFrame = null;
 
     relationFilter.innerHTML = ['<option value="all">全部关系</option>']
       .concat(graphPayload.relationTypes.map(item => `<option value="${item}">${item}</option>`))
@@ -327,27 +329,47 @@ window.cytoscape = window.cytoscape || cytoscape;
       return `<div class="detail-card"><div class="section-title">${title}</div><ul class="list">${relations.map(item => `<li>${item}</li>`).join('')}</ul></div>`;
     }
 
+    function repositionDetailCard() {
+      if (detailCardFrame !== null) {
+        window.cancelAnimationFrame(detailCardFrame);
+      }
+      detailCardFrame = requestAnimationFrame(() => {
+        detailCardFrame = null;
+        if (!activeDetailNode || floatingDetailCard.classList.contains('hidden')) return;
+        const stageRect = graphStage.getBoundingClientRect();
+        const previousVisibility = floatingDetailCard.style.visibility;
+        floatingDetailCard.style.visibility = 'hidden';
+        const cardRect = floatingDetailCard.getBoundingClientRect();
+        const pos = activeDetailNode.renderedPosition();
+        let left = pos.x + 20;
+        let top = pos.y - 20;
+        const maxLeft = Math.max(12, stageRect.width - cardRect.width - 12);
+        const maxTop = Math.max(12, stageRect.height - cardRect.height - 12);
+        left = Math.max(12, Math.min(left, maxLeft));
+        top = Math.max(12, Math.min(top, maxTop));
+        floatingDetailCard.style.left = `${left}px`;
+        floatingDetailCard.style.top = `${top}px`;
+        floatingDetailCard.style.visibility = previousVisibility === 'hidden' ? 'visible' : (previousVisibility || 'visible');
+      });
+    }
+
     function showInlineDetailCard(node, htmlContent) {
+      activeDetailNode = node;
       floatingDetailCard.innerHTML = htmlContent;
       floatingDetailCard.classList.remove('hidden');
       floatingDetailCard.style.visibility = 'hidden';
-      const stageRect = graphStage.getBoundingClientRect();
-      const cardRect = floatingDetailCard.getBoundingClientRect();
-      const pos = node.renderedPosition();
-      let left = pos.x + 20;
-      let top = pos.y - 20;
-      const maxLeft = Math.max(12, stageRect.width - cardRect.width - 12);
-      const maxTop = Math.max(12, stageRect.height - cardRect.height - 12);
-      left = Math.max(12, Math.min(left, maxLeft));
-      top = Math.max(12, Math.min(top, maxTop));
-      floatingDetailCard.style.left = `${left}px`;
-      floatingDetailCard.style.top = `${top}px`;
-      floatingDetailCard.style.visibility = 'visible';
+      repositionDetailCard();
     }
 
     function hideInlineDetailCard() {
+      activeDetailNode = null;
+      if (detailCardFrame !== null) {
+        window.cancelAnimationFrame(detailCardFrame);
+        detailCardFrame = null;
+      }
       floatingDetailCard.classList.add('hidden');
       floatingDetailCard.innerHTML = defaultPanelHtml;
+      floatingDetailCard.style.visibility = 'visible';
     }
 
     function escapeHtml(value) {
@@ -403,6 +425,7 @@ window.cytoscape = window.cytoscape || cytoscape;
     function resetToExplorationMode(options = {}) {
       const shouldFit = options.fit !== false;
       const shouldResetInputs = options.resetInputs !== false;
+      activeDetailNode = null;
       clearTraceClasses();
       cy.elements().removeClass('highlighted');
       cy.elements().removeClass('dimmed');
@@ -741,6 +764,7 @@ window.cytoscape = window.cytoscape || cytoscape;
           const details = document.getElementById('relation-details');
           details.classList.toggle('hidden');
           button.textContent = details.classList.contains('hidden') ? '展开关系明细' : '收起关系明细';
+          repositionDetailCard();
         });
       }
     }
@@ -809,7 +833,6 @@ window.cytoscape = window.cytoscape || cytoscape;
       neighborhood.removeClass('dimmed');
       neighborhood.addClass('highlighted');
       setFilteringState(true);
-      cy.fit(neighborhood, 90);
     }
 
     cy.on('tap', 'node', event => {
@@ -830,6 +853,8 @@ window.cytoscape = window.cytoscape || cytoscape;
         resetToExplorationMode({ fit: false, resetInputs: false });
       }
     });
+
+    cy.on('pan zoom resize', repositionDetailCard);
 
     relationFilter.addEventListener('change', () => {
       applyRelationFilter();

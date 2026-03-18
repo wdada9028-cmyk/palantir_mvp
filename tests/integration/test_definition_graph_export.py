@@ -216,8 +216,24 @@ def test_exported_html_contains_node_relative_detail_card_positioning(tmp_path: 
 
     assert 'max-width: 280px' in text
     assert 'font-size: 12px' in text
-    assert 'node.renderedPosition()' in text
+    assert 'activeDetailNode.renderedPosition()' in text
     assert 'let left = pos.x + 20' in text
     assert 'let top = pos.y - 20' in text
     assert 'left = Math.max(12, Math.min(left, maxLeft));' in text
     assert 'top = Math.max(12, Math.min(top, maxTop));' in text
+
+
+
+def test_exported_html_repositions_detail_card_on_viewport_changes(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology v2'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'let activeDetailNode = null' in text
+    assert 'function repositionDetailCard()' in text
+    assert "requestAnimationFrame(() => {" in text
+    assert "cy.on('pan zoom resize', repositionDetailCard);" in text
+    assert 'activeDetailNode = node;' in text
+    assert 'activeDetailNode = null;' in text
+    assert 'repositionDetailCard();' in text
+    assert 'cy.fit(neighborhood, 90);' not in text
