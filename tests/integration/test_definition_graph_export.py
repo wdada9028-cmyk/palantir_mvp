@@ -207,3 +207,17 @@ def test_exported_html_contains_trace_reset_mode_controls(tmp_path: Path):
     assert 'event.target === cy' in text
     assert 'max-width: 280px' in text
     assert 'font-size: 12px' in text
+
+
+def test_exported_html_contains_node_relative_detail_card_positioning(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology v2'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'max-width: 280px' in text
+    assert 'font-size: 12px' in text
+    assert 'node.renderedPosition()' in text
+    assert 'let left = pos.x + 20' in text
+    assert 'let top = pos.y - 20' in text
+    assert 'left = Math.max(12, Math.min(left, maxLeft));' in text
+    assert 'top = Math.max(12, Math.min(top, maxTop));' in text

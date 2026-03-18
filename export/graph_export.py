@@ -331,20 +331,15 @@ window.cytoscape = window.cytoscape || cytoscape;
       floatingDetailCard.innerHTML = htmlContent;
       floatingDetailCard.classList.remove('hidden');
       floatingDetailCard.style.visibility = 'hidden';
-      const graphStage = document.querySelector('.graph-stage');
       const stageRect = graphStage.getBoundingClientRect();
       const cardRect = floatingDetailCard.getBoundingClientRect();
-      const nodePos = node.renderedPosition();
-      let left = nodePos.x + 28;
-      let top = nodePos.y - cardRect.height / 2;
-      if (left + cardRect.width > stageRect.width - 12) {
-        left = nodePos.x - cardRect.width - 28;
-      }
-      if (left < 12) left = 12;
-      if (top < 12) top = 12;
-      if (top + cardRect.height > stageRect.height - 12) {
-        top = stageRect.height - cardRect.height - 12;
-      }
+      const pos = node.renderedPosition();
+      let left = pos.x + 20;
+      let top = pos.y - 20;
+      const maxLeft = Math.max(12, stageRect.width - cardRect.width - 12);
+      const maxTop = Math.max(12, stageRect.height - cardRect.height - 12);
+      left = Math.max(12, Math.min(left, maxLeft));
+      top = Math.max(12, Math.min(top, maxTop));
       floatingDetailCard.style.left = `${left}px`;
       floatingDetailCard.style.top = `${top}px`;
       floatingDetailCard.style.visibility = 'visible';
