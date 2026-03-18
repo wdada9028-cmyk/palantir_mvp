@@ -312,7 +312,11 @@ def _build_display_name_map(graph: OntologyGraph) -> dict[str, str]:
 def _build_relation_name_map(graph: OntologyGraph) -> dict[str, str]:
     relation_name_map: dict[str, str] = {}
     for relation in graph.relations:
-        relation_name_map[relation.relation] = _RELATION_TRANSLATIONS.get(relation.relation, relation.relation)
+        translated = _RELATION_TRANSLATIONS.get(relation.relation, relation.relation)
+        if translated.startswith('[') and translated.endswith(']'):
+            relation_name_map[relation.relation] = translated
+        else:
+            relation_name_map[relation.relation] = f'[{translated}]'
     return relation_name_map
 
 

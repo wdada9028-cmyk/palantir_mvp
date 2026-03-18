@@ -4,23 +4,23 @@ from cloud_delivery_ontology_palantir.search.ontology_query_engine import retrie
 
 
 _ALL_RELATIONS = {
-    'AGGREGATES': '聚合',
-    'APPLIES_TO': '作用于',
-    'ASSIGNED_TO': '分配给',
-    'ASSIGNS': '指派给',
-    'CONSTRAINS': '约束',
-    'CONTAINS': '包含',
-    'DEFINES': '定义',
-    'DELIVERS': '交付',
-    'DEPENDS_ON': '依赖',
-    'EXECUTES': '执行',
-    'GENERATES': '生成',
-    'HAS': '包含',
-    'OCCURS_AT': '发生于位置',
-    'OCCURS_IN': '发生于机房',
-    'REFERENCES': '引用',
-    'SHIPS': '运输',
-    'USES': '使用',
+    'AGGREGATES': '[聚合]',
+    'APPLIES_TO': '[作用于]',
+    'ASSIGNED_TO': '[分配给]',
+    'ASSIGNS': '[指派给]',
+    'CONSTRAINS': '[约束]',
+    'CONTAINS': '[包含]',
+    'DEFINES': '[定义]',
+    'DELIVERS': '[交付]',
+    'DEPENDS_ON': '[依赖]',
+    'EXECUTES': '[执行]',
+    'GENERATES': '[生成]',
+    'HAS': '[包含]',
+    'OCCURS_AT': '[发生于位置]',
+    'OCCURS_IN': '[发生于机房]',
+    'REFERENCES': '[引用]',
+    'SHIPS': '[运输]',
+    'USES': '[使用]',
 }
 
 
@@ -186,7 +186,7 @@ def test_retrieve_ontology_evidence_builds_localized_display_maps(monkeypatch):
 
     assert result.display_name_map['object_type:ArrivalPlan'] == '到货计划(ArrivalPlan)'
     assert result.display_name_map['object_type:PoDPosition'] == '泊位(PoDPosition)'
-    assert result.relation_name_map['REFERENCES'] == '引用'
+    assert result.relation_name_map['REFERENCES'] == '[引用]'
 
 
 def test_retrieve_ontology_evidence_relation_name_map_covers_current_ontology_relations():
@@ -219,3 +219,4 @@ def test_retrieve_ontology_evidence_relation_name_map_covers_current_ontology_re
     result = retrieve_ontology_evidence(graph, '左实体')
 
     assert result.relation_name_map == _ALL_RELATIONS
+    assert all(value.startswith('[') and value.endswith(']') for value in result.relation_name_map.values())
