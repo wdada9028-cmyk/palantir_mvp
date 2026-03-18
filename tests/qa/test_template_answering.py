@@ -88,16 +88,92 @@ def test_build_template_answer_localizes_trace_report():
             'object_type:ArrivalPlan': '到货计划(ArrivalPlan)',
             'object_type:PoDPosition': '泊位(PoDPosition)',
         },
-        relation_name_map={'REFERENCES': '引用'},
+        relation_name_map={'REFERENCES': '[引用]'},
     )
 
     answer = build_template_answer(bundle)
 
     assert '检索路径报告' in answer.answer
     assert '语义解析认为问题在问到货计划' in answer.answer
-    assert '到货计划(ArrivalPlan)' in answer.answer
-    assert '[引用]' in answer.answer
-    assert '泊位(PoDPosition)' in answer.answer
+    assert '随后从 到货计划(ArrivalPlan) 沿 [引用] 扩展到 泊位(PoDPosition)' in answer.answer
+    assert '命中关系：\n- 到货计划(ArrivalPlan) [引用] 泊位(PoDPosition)' in answer.answer
     assert 'REFERENCES' not in answer.answer
     assert 'ArrivalPlan REFERENCES PoDPosition' not in answer.answer
     assert answer.insufficient_evidence is False
+
+
+def test_build_template_answer_dedupes_trace_edges_and_strips_verbose_entity_descriptions():
+    bundle = OntologyEvidenceBundle(
+        question='项目和机房里程碑是什么关系',
+        seed_node_ids=['object_type:Project'],
+        matched_node_ids=['object_type:Project', 'object_type:RoomMilestone'],
+        matched_edge_ids=['e1', 'e2'],
+        highlight_steps=[],
+        evidence_chain=[
+            EvidenceItem(
+                evidence_id='E1',
+                kind='seed',
+                label='Project',
+                message='问题命中了实体 项目(Project)',
+                node_ids=['object_type:Project'],
+                why_matched=['语义解析认为问题在问项目'],
+            ),
+            EvidenceItem(
+                evidence_id='E2',
+                kind='relation',
+                label='Project HAS RoomMilestone',
+                message='项目包含机房里程碑',
+                node_ids=['object_type:Project', 'object_type:RoomMilestone'],
+                edge_ids=['e1'],
+                why_matched=['关系邻接扩展'],
+            ),
+            EvidenceItem(
+                evidence_id='E3',
+                kind='relation',
+                label='Project HAS RoomMilestone',
+                message='项目包含机房里程碑',
+                node_ids=['object_type:Project', 'object_type:RoomMilestone'],
+                edge_ids=['e2'],
+                why_matched=['关系邻接扩展'],
+            ),
+        ],
+        insufficient_evidence=False,
+        search_trace=SearchTrace(
+            seed_node_ids=['object_type:Project'],
+            expansion_steps=[
+                TraceExpansionStep(
+                    step=1,
+                    from_node_id='object_type:Project',
+                    edge_id='e1',
+                    to_node_id='object_type:RoomMilestone',
+                    relation='HAS',
+                    reason='关系邻接扩展',
+                    snapshot_node_ids=['object_type:Project', 'object_type:RoomMilestone'],
+                    snapshot_edge_ids=['e1'],
+                ),
+                TraceExpansionStep(
+                    step=2,
+                    from_node_id='object_type:Project',
+                    edge_id='e2',
+                    to_node_id='object_type:RoomMilestone',
+                    relation='HAS',
+                    reason='关系邻接扩展',
+                    snapshot_node_ids=['object_type:Project', 'object_type:RoomMilestone'],
+                    snapshot_edge_ids=['e1', 'e2'],
+                ),
+            ],
+        ),
+        display_name_map={
+            'object_type:Project': '项目。表示一个面向客户的交付项目，是所有对象的业务聚合根。(Project)',
+            'object_type:RoomMilestone': '机房里程碑。表示机房级里程碑约束。(RoomMilestone)',
+        },
+        relation_name_map={'HAS': '[包含]'},
+    )
+
+    answer = build_template_answer(bundle)
+
+    assert answer.answer.count('随后从 项目(Project) 沿 [包含] 扩展到 机房里程碑(RoomMilestone)') == 1
+    assert answer.answer.count('- 项目(Project) [包含] 机房里程碑(RoomMilestone)') == 1
+    assert '表示一个面向客户的交付项目' not in answer.answer
+    assert '表示机房级里程碑约束' not in answer.answer
+    assert '命中关系：\n- 项目(Project) [包含] 机房里程碑(RoomMilestone)' in answer.answer
