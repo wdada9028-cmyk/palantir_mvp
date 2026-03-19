@@ -141,6 +141,11 @@ def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive
     .trace-path { box-shadow: 0 0 0 1px rgba(249,115,22,0.35); }
     .trace-dimmed { opacity: 0.38; }
     .evidence-timeline button { width: 100%; text-align: left; }
+    .qa-answer-text { min-height: 72px; line-height: 1.7; font-size: 15px; color: #f8fafc; white-space: pre-wrap; }
+    .qa-trace-report { color: #cbd5e1; }
+    .qa-trace-report-body { margin-top: 8px; line-height: 1.7; white-space: pre-wrap; color: #cbd5e1; }
+    .qa-trace-report summary { cursor: pointer; list-style: none; }
+    .qa-trace-report summary::-webkit-details-marker { display: none; }
   </style>
 </head>
 <body>
@@ -166,9 +171,10 @@ def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive
         <div class="qa-subtitle">仅基于当前本体系统回答</div>
         <textarea id="qa-question" class="qa-input" placeholder="请输入你想询问的本体问题"></textarea>
         <div class="qa-actions"><button id="qa-submit" class="qa-submit">提问</button></div>
-        <div id="qa-status" class="qa-card hidden"><div class="qa-card-title">状态</div><div>等待提问</div></div>
-        <div id="qa-answer" class="qa-card hidden"><div class="qa-card-title">答案</div><div>等待回答</div></div>
-        <div id="evidence-timeline" class="qa-card hidden evidence-timeline"><div class="qa-card-title">证据时间线</div><div>等待检索</div></div>
+        <div id="qa-status" class="qa-card hidden"><div class="qa-card-title">\u72b6\u6001</div><div>\u7b49\u5f85\u63d0\u95ee</div></div>
+        <div id="qa-answer" class="qa-card hidden"><div class="qa-card-title">\u7b54\u6848\u6458\u8981</div><div id="qa-answer-text" class="qa-answer-text">\u7b49\u5f85\u56de\u7b54</div></div>
+        <details id="qa-trace-report" class="qa-card hidden qa-trace-report"><summary class="qa-card-title">\u903b\u8f91\u6eaf\u6e90</summary><div id="qa-trace-report-body" class="qa-trace-report-body">\u7b49\u5f85\u6eaf\u6e90</div></details>
+        <div id="evidence-timeline" class="qa-card hidden evidence-timeline"><div class="qa-card-title">\u8bc1\u636e\u65f6\u95f4\u7ebf</div><div>\u7b49\u5f85\u68c0\u7d22</div></div>
       </section>
   </div>
   <script>__CYTOSCAPE_BUNDLE__
@@ -190,9 +196,11 @@ window.cytoscape = window.cytoscape || cytoscape;
     const qaSubmitButton = document.getElementById('qa-submit');
     const qaStatusCard = document.getElementById('qa-status');
     const qaAnswerCard = document.getElementById('qa-answer');
+    const qaAnswerText = document.getElementById('qa-answer-text');
+    const qaTraceReportCard = document.getElementById('qa-trace-report');
+    const qaTraceReportBody = document.getElementById('qa-trace-report-body');
     const qaEvidenceTimelineCard = document.getElementById('evidence-timeline');
     const qaStatusBody = qaStatusCard.querySelector('div:last-child');
-    const qaAnswerBody = qaAnswerCard.querySelector('div:last-child');
     const qaEvidenceTimelineBody = qaEvidenceTimelineCard.querySelector('div:last-child');
     const defaultPanelHtml = __DEFAULT_PANEL_JSON__;
     let qaEventSource = null;
@@ -388,7 +396,19 @@ window.cytoscape = window.cytoscape || cytoscape;
 
     function setQaAnswer(message) {
       qaAnswerCard.classList.remove('hidden');
-      qaAnswerBody.innerHTML = escapeHtml(message || '');
+      qaAnswerText.innerHTML = escapeHtml(message || '');
+    }
+
+    function setQaTraceReport(message) {
+      if (!message) {
+        qaTraceReportCard.classList.add('hidden');
+        qaTraceReportCard.open = false;
+        qaTraceReportBody.innerHTML = '\u7b49\u5f85\u6eaf\u6e90';
+        return;
+      }
+      qaTraceReportCard.classList.remove('hidden');
+      qaTraceReportCard.open = true;
+      qaTraceReportBody.innerHTML = escapeHtml(message);
     }
 
     function clearTraceClasses() {
@@ -446,11 +466,12 @@ window.cytoscape = window.cytoscape || cytoscape;
     }
 
     function clearQaPresentation() {
-      setQaStatus('\\u7b49\\u5f85\\u63d0\\u95ee');
+      setQaStatus('\u7b49\u5f85\u63d0\u95ee');
       qaAnswerCard.classList.add('hidden');
-      qaAnswerBody.textContent = '\\u7b49\\u5f85\\u56de\\u7b54';
+      qaAnswerText.textContent = '\u7b49\u5f85\u56de\u7b54';
+      setQaTraceReport('');
       qaEvidenceTimelineCard.classList.add('hidden');
-      qaEvidenceTimelineBody.innerHTML = '\\u7b49\\u5f85\\u68c0\\u7d22';
+      qaEvidenceTimelineBody.innerHTML = '\u7b49\u5f85\u68c0\u7d22';
       persistedEvidenceChain = [];
       persistedEvidenceMap = new Map();
       evidenceSnapshots = new Map();
@@ -658,11 +679,16 @@ window.cytoscape = window.cytoscape || cytoscape;
           persistFinalEvidence(payload || {});
           return;
         }
+        if (eventType === 'answer_delta') {
+          setQaAnswer(payload.answer_text_so_far || payload.delta || '');
+          return;
+        }
         if (eventType === 'answer_done') {
           if (!this.traceProtocolSeen) {
             persistFinalEvidence(payload || {});
           }
-          setQaAnswer(payload.answer || '');
+          setQaAnswer(payload.answer_text || payload.answer || '');
+          setQaTraceReport(payload.trace_report || '');
         }
       }
     }
@@ -682,7 +708,7 @@ window.cytoscape = window.cytoscape || cytoscape;
       setQaStatus('\\u6b63\\u5728\\u68c0\\u7d22\\u672c\\u4f53\\u8bc1\\u636e...');
       const eventSource = new EventSource(`/api/qa/stream?q=${encodeURIComponent(trimmedQuestion)}`);
       qaEventSource = eventSource;
-      ['trace_anchor', 'trace_expand', 'evidence_final', 'answer_done'].forEach(eventType => {
+      ['trace_anchor', 'trace_expand', 'evidence_final', 'answer_delta', 'answer_done'].forEach(eventType => {
         eventSource.addEventListener(eventType, event => {
           const payload = JSON.parse(event.data);
           playbackController.enqueue(eventType, payload);

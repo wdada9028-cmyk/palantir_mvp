@@ -237,3 +237,17 @@ def test_exported_html_repositions_detail_card_on_viewport_changes(tmp_path: Pat
     assert 'activeDetailNode = null;' in text
     assert 'repositionDetailCard();' in text
     assert 'cy.fit(neighborhood, 90);' not in text
+
+
+
+def test_exported_html_contains_streaming_answer_and_trace_sections(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'answer_delta' in text
+    assert 'trace_report' in text
+    assert '\u903b\u8f91\u6eaf\u6e90' in text
+    assert 'answer_text_so_far' in text
+    assert 'qa-answer-text' in text
+    assert 'qa-trace-report' in text
