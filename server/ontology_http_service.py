@@ -1,10 +1,11 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
-from ..qa.template_answering import TemplateAnswer
+from ..qa.generator import GeneratorChunk, GeneratorResult, iter_generated_answer
+from ..qa.template_answering import TemplateAnswer, _build_search_trace_report, _dedupe_trace_steps
 from ..search.ontology_query_models import OntologyEvidenceBundle, RetrievalStep, TraceExpansionStep
 
 DEFAULT_TRACE_DELAY_MS = 650
@@ -14,11 +15,11 @@ def sse_event(name: str, payload: dict[str, object]) -> str:
     return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-def iter_qa_events(
+async def iter_qa_events(
     bundle: OntologyEvidenceBundle,
-    answer: TemplateAnswer,
+    fallback_answer: TemplateAnswer,
     trace_delay_ms: int = DEFAULT_TRACE_DELAY_MS,
-) -> Iterable[str]:
+) -> AsyncIterator[str]:
     session_id = uuid4().hex
     step_counter = 0
 
@@ -75,6 +76,30 @@ def iter_qa_events(
         },
     )
 
+    final_result: GeneratorResult | None = None
+    try:
+        async for item in iter_generated_answer(bundle.question, bundle, fallback_answer):
+            if isinstance(item, GeneratorChunk):
+                step_counter += 1
+                yield sse_event(
+                    'answer_delta',
+                    {
+                        'session_id': session_id,
+                        'step': step_counter,
+                        'delta': item.delta,
+                        'answer_text_so_far': item.answer_text_so_far,
+                    },
+                )
+                continue
+            final_result = item
+    except Exception:
+        final_result = GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+
+    if final_result is None:
+        final_result = GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+
+    trace_report = _build_search_trace_report(bundle, _dedupe_trace_steps(bundle.search_trace.expansion_steps))
+
     step_counter += 1
     yield sse_event(
         'answer_done',
@@ -85,14 +110,18 @@ def iter_qa_events(
             'node_ids': bundle.matched_node_ids,
             'edge_ids': bundle.matched_edge_ids,
             'evidence_ids': [item.evidence_id for item in bundle.evidence_chain],
-            'answer': answer.answer,
+            'answer': fallback_answer.answer,
+            'answer_text': final_result.answer_text,
+            'trace_report': trace_report,
+            'used_fallback': final_result.used_fallback,
             'evidence_chain': [item.to_dict() for item in bundle.evidence_chain],
             'matched_node_ids': bundle.matched_node_ids,
             'matched_edge_ids': bundle.matched_edge_ids,
-            'insufficient_evidence': answer.insufficient_evidence,
+            'insufficient_evidence': fallback_answer.insufficient_evidence,
             'search_trace': bundle.search_trace.to_dict(),
         },
     )
+
 
 
 def _step_payload(session_id: str, step_number: int, step: RetrievalStep) -> dict[str, object]:
@@ -104,6 +133,7 @@ def _step_payload(session_id: str, step_number: int, step: RetrievalStep) -> dic
         'edge_ids': step.edge_ids,
         'evidence_ids': step.evidence_ids,
     }
+
 
 
 def _trace_expand_payload(

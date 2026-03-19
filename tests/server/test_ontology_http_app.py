@@ -134,3 +134,62 @@ def test_qa_stream_emits_new_trace_events_in_order(tmp_path: Path):
     assert text.index('event: trace_expand') < text.index('event: evidence_final')
     assert text.index('event: evidence_final') < text.index('event: answer_done')
     assert '"delay_ms":' in text
+
+
+
+def test_qa_stream_emits_answer_delta_and_extended_answer_done(tmp_path: Path, monkeypatch):
+    input_file = tmp_path / 'ontology.md'
+    _write_relation_ontology(input_file)
+
+    from cloud_delivery_ontology_palantir.qa.generator import GeneratorChunk, GeneratorResult
+
+    async def fake_generator(question, bundle, fallback_answer):
+        yield GeneratorChunk(delta='???', answer_text_so_far='???')
+        yield GeneratorChunk(delta='????(ArrivalPlan)', answer_text_so_far='???????(ArrivalPlan)')
+        yield GeneratorResult(answer_text='???????(ArrivalPlan) ?????????(PoD)?', used_fallback=False)
+
+    monkeypatch.setattr(
+        'cloud_delivery_ontology_palantir.server.ontology_http_service.iter_generated_answer',
+        fake_generator,
+    )
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': '???????? PoD?'})
+    text = response.text
+
+    assert response.status_code == 200
+    assert text.index('event: anchor_node') < text.index('event: expand_neighbors')
+    assert text.index('event: expand_neighbors') < text.index('event: filter_nodes')
+    assert text.index('event: filter_nodes') < text.index('event: focus_subgraph')
+    assert text.index('event: evidence_final') < text.index('event: answer_delta')
+    assert text.index('event: answer_delta') < text.index('event: answer_done')
+    assert '"answer":' in text
+    assert '"answer_text":' in text
+    assert '"trace_report":' in text
+    assert '"used_fallback": false' in text
+
+
+
+def test_qa_stream_generator_failure_still_returns_fallback_answer_done(tmp_path: Path, monkeypatch):
+    input_file = tmp_path / 'ontology.md'
+    _write_relation_ontology(input_file)
+
+    async def failing_generator(question, bundle, fallback_answer):
+        raise RuntimeError('generator boom')
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(
+        'cloud_delivery_ontology_palantir.server.ontology_http_service.iter_generated_answer',
+        failing_generator,
+    )
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': '???????? PoD?'})
+    text = response.text
+
+    assert response.status_code == 200
+    assert 'event: answer_done' in text
+    assert '"used_fallback": true' in text
+    assert '"answer_text":' in text
