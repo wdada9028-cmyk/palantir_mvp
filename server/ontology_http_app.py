@@ -38,7 +38,7 @@ def create_app(*, input_file: Path) -> FastAPI:
     @app.get('/api/qa/stream')
     def qa_stream(q: str = Query(..., min_length=1)) -> StreamingResponse:
         bundle = retrieve_ontology_evidence(app.state.graph, q)
-        answer = build_template_answer(bundle)
-        return StreamingResponse(iter_qa_events(bundle, answer), media_type='text/event-stream')
+        fallback_answer = build_template_answer(bundle)
+        return StreamingResponse(iter_qa_events(bundle, fallback_answer), media_type='text/event-stream')
 
     return app
