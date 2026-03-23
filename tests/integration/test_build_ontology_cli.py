@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 import cloud_delivery_ontology_palantir.pipelines.build_ontology_pipeline as pipeline_module
 from cloud_delivery_ontology_palantir.cli import main
@@ -36,3 +36,15 @@ def test_build_ontology_cli_with_tql_uses_pipeline_resolution_before_build(tmp_p
     assert (output_dir / 'ontology.json').exists()
     assert (output_dir / 'schema_summary.json').exists()
     assert (output_dir / 'ontology.html').exists()
+
+
+def test_cli_help_text_keeps_tql_only_for_build_and_markdown_for_serve(capsys):
+    assert main(['build-ontology', '--help']) == 0
+    build_help = capsys.readouterr().out
+    assert '.md' in build_help
+    assert '.tql' in build_help
+
+    assert main(['serve-ontology', '--help']) == 0
+    serve_help = capsys.readouterr().out
+    assert 'markdown file' in serve_help
+    assert '.tql' not in serve_help
