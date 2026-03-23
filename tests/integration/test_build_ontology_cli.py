@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import cloud_delivery_ontology_palantir.pipelines.build_ontology_pipeline as pipeline_module
 from cloud_delivery_ontology_palantir.cli import main
@@ -6,7 +6,7 @@ from cloud_delivery_ontology_palantir.cli import main
 
 def test_build_ontology_cli_generates_outputs(tmp_path: Path):
     root = Path(__file__).resolve().parents[2]
-    input_file = next(root.glob('*核心决策v2.md'))
+    input_file = next(root.glob('*????v2.md'))
     output_dir = tmp_path / 'output'
     assert main(['build-ontology', '--input-file', str(input_file), '--output-dir', str(output_dir)]) == 0
     assert (output_dir / 'ontology.json').exists()
@@ -19,7 +19,16 @@ def test_build_ontology_cli_with_tql_uses_pipeline_resolution_before_build(tmp_p
     input_file.write_text('SELECT * FROM ontology;', encoding='utf-8')
     converted_md = tmp_path / 'ontology.converted.md'
     converted_md.write_text(
-        '# Test Ontology\n\n## 4. Object Types\n### `Project`\n中文释义：项目\n关键属性：\n- `project_id`: 项目ID\n',
+        '# ??\n\n'
+        '## 4. Object Types\n'
+        '## 4.1 Project Layer\n'
+        '### `Project`\n'
+        '???????\n'
+        '?????\n'
+        '- `project_id`: ??ID\n\n'
+        '## 5. Link Types\n'
+        '### 5.1 Relation Layer\n'
+        '- `Project RELATES_TO Project`: ??????\n',
         encoding='utf-8',
     )
     output_dir = tmp_path / 'output'
