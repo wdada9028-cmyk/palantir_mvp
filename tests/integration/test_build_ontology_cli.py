@@ -14,19 +14,12 @@ def test_build_ontology_cli_generates_outputs(tmp_path: Path):
     assert (output_dir / 'ontology.html').exists()
 
 
-def test_build_ontology_cli_resolves_tql_input_before_build(tmp_path: Path, monkeypatch):
+def test_build_ontology_cli_accepts_tql_input_and_delegates_to_pipeline(tmp_path: Path, monkeypatch):
     input_file = tmp_path / 'ontology.tql'
     input_file.write_text('SELECT * FROM ontology;', encoding='utf-8')
-    converted_file = tmp_path / 'ontology.converted.md'
-    converted_file.write_text('# converted', encoding='utf-8')
     output_dir = tmp_path / 'output'
 
-    resolver_calls: list[Path] = []
     build_calls: list[dict[str, object]] = []
-
-    def fake_resolve_input_file(path: Path) -> Path:
-        resolver_calls.append(Path(path))
-        return converted_file
 
     def fake_build_ontology_from_markdown(
         input_file: str | Path,
@@ -57,9 +50,17 @@ def test_build_ontology_cli_resolves_tql_input_before_build(tmp_path: Path, monk
             'ontology_html': ontology_html,
         }
 
-    monkeypatch.setattr(cli_module, 'resolve_input_file', fake_resolve_input_file, raising=False)
     monkeypatch.setattr(cli_module, 'build_ontology_from_markdown', fake_build_ontology_from_markdown)
 
     assert main(['build-ontology', '--input-file', str(input_file), '--output-dir', str(output_dir)]) == 0
-    assert resolver_calls == [input_file]
-    assert build_calls[0]['input_file'] == converted_file
+    assert build_calls == [
+        {
+            'input_file': input_file,
+            'output_dir': output_dir,
+            'generate_html': True,
+            'generate_pdf': False,
+        }
+    ]
+    assert (output_dir / 'ontology.json').exists()
+    assert (output_dir / 'schema_summary.json').exists()
+    assert (output_dir / 'ontology.html').exists()

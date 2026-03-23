@@ -13,9 +13,9 @@ def test_resolve_input_file_passthrough_for_markdown_without_conversion(tmp_path
 
     converter_calls: list[Path] = []
 
-    def fake_convert_tql_to_markdown(path: Path) -> Path:
+    def fake_convert_tql_to_markdown(path: Path) -> str:
         converter_calls.append(Path(path))
-        return tmp_path / 'should-not-be-used.converted.md'
+        return '# should not be used'
 
     monkeypatch.setattr(resolver_module, 'convert_tql_to_markdown', fake_convert_tql_to_markdown, raising=False)
 
@@ -25,21 +25,24 @@ def test_resolve_input_file_passthrough_for_markdown_without_conversion(tmp_path
     assert converter_calls == []
 
 
-def test_resolve_input_file_converts_tql_to_converted_markdown(tmp_path: Path, monkeypatch):
+def test_resolve_input_file_converts_tql_into_stem_converted_markdown_in_same_directory(tmp_path: Path, monkeypatch):
     resolver_module = _load_resolver_module()
-    input_file = tmp_path / 'ontology.tql'
+    input_file = tmp_path / 'ontology_source.tql'
     input_file.write_text('SELECT * FROM ontology;', encoding='utf-8')
-    converted_file = tmp_path / 'ontology.converted.md'
 
     converter_calls: list[Path] = []
+    converted_text = '# converted from tql\n- node: PoD\n'
 
-    def fake_convert_tql_to_markdown(path: Path) -> Path:
+    def fake_convert_tql_to_markdown(path: Path) -> str:
         converter_calls.append(Path(path))
-        return converted_file
+        return converted_text
 
     monkeypatch.setattr(resolver_module, 'convert_tql_to_markdown', fake_convert_tql_to_markdown, raising=False)
 
     resolved = resolver_module.resolve_input_file(input_file)
 
+    expected_output = input_file.with_suffix('.converted.md')
     assert converter_calls == [input_file]
-    assert resolved == converted_file
+    assert resolved == expected_output
+    assert expected_output.exists()
+    assert expected_output.read_text(encoding='utf-8') == converted_text
