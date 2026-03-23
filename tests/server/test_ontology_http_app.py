@@ -193,3 +193,38 @@ def test_qa_stream_generator_failure_still_returns_fallback_answer_done(tmp_path
     assert 'event: answer_done' in text
     assert '"used_fallback": true' in text
     assert '"answer_text":' in text
+
+
+def test_create_app_resolves_tql_input_before_loading_graph(tmp_path: Path, monkeypatch):
+    import cloud_delivery_ontology_palantir.server.ontology_http_app as app_module
+
+    tql_file = tmp_path / 'ontology.tql'
+    tql_file.write_text('SELECT * FROM ontology;', encoding='utf-8')
+    converted_file = tmp_path / 'ontology.converted.md'
+    converted_file.write_text('# converted ontology', encoding='utf-8')
+
+    resolver_calls: list[Path] = []
+    parse_source_files: list[str] = []
+
+    def fake_resolve_input_file(path: Path) -> Path:
+        resolver_calls.append(Path(path))
+        return converted_file
+
+    def fake_parse_definition_markdown(text: str, *, source_file: str):
+        parse_source_files.append(source_file)
+        return object()
+
+    class _DummyGraph:
+        metadata = {'title': 'dummy'}
+
+    monkeypatch.setattr(app_module, 'resolve_input_file', fake_resolve_input_file, raising=False)
+    monkeypatch.setattr(app_module, 'parse_definition_markdown', fake_parse_definition_markdown)
+    monkeypatch.setattr(app_module, 'build_definition_graph', lambda spec: _DummyGraph())
+    monkeypatch.setattr(app_module, 'build_graph_payload', lambda graph: {'elements': []})
+    monkeypatch.setattr(app_module, 'build_interactive_graph_html', lambda graph, title: '<html></html>')
+
+    app = app_module.create_app(input_file=tql_file)
+
+    assert resolver_calls == [tql_file]
+    assert parse_source_files == [str(converted_file)]
+    assert app.state.input_file == converted_file
