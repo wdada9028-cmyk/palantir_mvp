@@ -6,7 +6,7 @@ def _load_resolver_module():
     return import_module('cloud_delivery_ontology_palantir.pipelines.input_file_resolver')
 
 
-def test_resolve_input_file_passthrough_for_markdown_without_conversion(tmp_path: Path, monkeypatch):
+def test_resolve_input_to_markdown_passthrough_for_markdown_without_conversion(tmp_path: Path, monkeypatch):
     resolver_module = _load_resolver_module()
     input_file = tmp_path / 'ontology.md'
     input_file.write_text('# ontology', encoding='utf-8')
@@ -24,13 +24,13 @@ def test_resolve_input_file_passthrough_for_markdown_without_conversion(tmp_path
         raising=False,
     )
 
-    resolved = resolver_module.resolve_input_file(input_file)
+    resolved = resolver_module.resolve_input_to_markdown(input_file)
 
     assert resolved == input_file
     assert converter_calls == []
 
 
-def test_resolve_input_file_converts_tql_into_stem_converted_markdown_in_same_directory(tmp_path: Path, monkeypatch):
+def test_resolve_input_to_markdown_converts_tql_into_stem_converted_markdown_in_same_directory(tmp_path: Path, monkeypatch):
     resolver_module = _load_resolver_module()
     input_file = tmp_path / 'ontology_source.tql'
     input_file.write_text('SELECT * FROM ontology;', encoding='utf-8')
@@ -51,7 +51,7 @@ def test_resolve_input_file_converts_tql_into_stem_converted_markdown_in_same_di
         raising=False,
     )
 
-    resolved = resolver_module.resolve_input_file(input_file)
+    resolved = resolver_module.resolve_input_to_markdown(input_file)
 
     expected_output = input_file.with_suffix('.converted.md')
     assert converter_calls == [input_file]

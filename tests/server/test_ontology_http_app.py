@@ -206,7 +206,7 @@ def test_create_app_resolves_tql_input_before_loading_graph(tmp_path: Path, monk
     resolver_calls: list[Path] = []
     parse_source_files: list[str] = []
 
-    def fake_resolve_input_file(path: Path) -> Path:
+    def fake_resolve_input_to_markdown(path: Path) -> Path:
         resolver_calls.append(Path(path))
         return converted_file
 
@@ -217,7 +217,7 @@ def test_create_app_resolves_tql_input_before_loading_graph(tmp_path: Path, monk
     class _DummyGraph:
         metadata = {'title': 'dummy'}
 
-    monkeypatch.setattr(app_module, 'resolve_input_file', fake_resolve_input_file, raising=False)
+    monkeypatch.setattr(app_module, 'resolve_input_to_markdown', fake_resolve_input_to_markdown, raising=False)
     monkeypatch.setattr(app_module, 'parse_definition_markdown', fake_parse_definition_markdown)
     monkeypatch.setattr(app_module, 'build_definition_graph', lambda spec: _DummyGraph())
     monkeypatch.setattr(app_module, 'build_graph_payload', lambda graph: {'elements': []})
