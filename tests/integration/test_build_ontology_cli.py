@@ -18,19 +18,9 @@ def test_build_ontology_cli_with_tql_uses_pipeline_resolution_before_build(tmp_p
     input_file = tmp_path / 'ontology.tql'
     input_file.write_text('SELECT * FROM ontology;', encoding='utf-8')
     converted_md = tmp_path / 'ontology.converted.md'
-    converted_md.write_text(
-        '# ??\n\n'
-        '## 4. Object Types\n'
-        '## 4.1 Project Layer\n'
-        '### `Project`\n'
-        '???????\n'
-        '?????\n'
-        '- `project_id`: ??ID\n\n'
-        '## 5. Link Types\n'
-        '### 5.1 Relation Layer\n'
-        '- `Project RELATES_TO Project`: ??????\n',
-        encoding='utf-8',
-    )
+    root = Path(__file__).resolve().parents[2]
+    sample_md = next(root.glob('*v2.md'))
+    converted_md.write_text(sample_md.read_text(encoding='utf-8'), encoding='utf-8')
     output_dir = tmp_path / 'output'
 
     resolver_calls: list[Path] = []
