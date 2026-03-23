@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from ..export.graph_export import build_graph_payload, build_interactive_graph_html
 from ..ontology.definition_graph_builder import build_definition_graph
 from ..ontology.definition_markdown_parser import parse_definition_markdown
+from ..pipelines.input_file_resolver import resolve_input_to_markdown
 from ..qa.template_answering import build_template_answer
 from ..search.ontology_query_engine import retrieve_ontology_evidence
 from .ontology_http_service import iter_qa_events
@@ -15,14 +16,16 @@ from .ontology_http_service import iter_qa_events
 
 def create_app(*, input_file: Path) -> FastAPI:
     input_path = Path(input_file)
-    text = input_path.read_text(encoding='utf-8')
-    spec = parse_definition_markdown(text, source_file=str(input_path))
+    resolved_input_path = resolve_input_to_markdown(input_path)
+    text = resolved_input_path.read_text(encoding='utf-8')
+    spec = parse_definition_markdown(text, source_file=str(resolved_input_path))
     graph = build_definition_graph(spec)
     graph_payload = build_graph_payload(graph)
     html = build_interactive_graph_html(graph, title=graph.metadata.get('title', 'Ontology Graph'))
 
     app = FastAPI()
     app.state.input_file = input_path
+    app.state.resolved_input_file = resolved_input_path
     app.state.graph = graph
     app.state.graph_payload = graph_payload
     app.state.graph_html = html

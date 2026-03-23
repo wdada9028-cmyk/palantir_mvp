@@ -31,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     build_parser.add_argument('--pdf', dest='generate_pdf', action='store_true', default=False, help='Generate PDF output')
 
     serve_parser = subparsers.add_parser('serve-ontology', help='Serve ontology HTTP page locally')
-    serve_parser.add_argument('--input-file', type=str, required=True, help='Path to the ontology definition markdown file')
+    serve_parser.add_argument('--input-file', type=str, required=True, help='Path to the ontology definition input file (.md or .tql)')
     serve_parser.add_argument('--host', type=str, default='127.0.0.1', help='Host interface for the local HTTP server')
     serve_parser.add_argument('--port', type=int, default=8000, help='Port for the local HTTP server')
 
