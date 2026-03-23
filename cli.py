@@ -20,18 +20,18 @@ def _configure_console_output() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     _configure_console_output()
-    parser = argparse.ArgumentParser(description='Build ontology definition graph from markdown')
+    parser = argparse.ArgumentParser(description='Build ontology definition graph from markdown or TQL')
     subparsers = parser.add_subparsers(dest='command', required=True)
 
-    build_parser = subparsers.add_parser('build-ontology', help='Build ontology definition graph artifacts from markdown')
-    build_parser.add_argument('--input-file', type=str, required=True, help='Path to the ontology definition markdown file')
+    build_parser = subparsers.add_parser('build-ontology', help='Build ontology definition graph artifacts from markdown or TQL')
+    build_parser.add_argument('--input-file', type=str, required=True, help='Path to the ontology definition input file (.md or .tql)')
     build_parser.add_argument('--output-dir', type=str, default='output', help='Directory to write generated artifacts')
     build_parser.add_argument('--html', dest='generate_html', action='store_true', default=True, help='Generate interactive HTML output')
     build_parser.add_argument('--no-html', dest='generate_html', action='store_false', help='Skip interactive HTML output')
     build_parser.add_argument('--pdf', dest='generate_pdf', action='store_true', default=False, help='Generate PDF output')
 
     serve_parser = subparsers.add_parser('serve-ontology', help='Serve ontology HTTP page locally')
-    serve_parser.add_argument('--input-file', type=str, required=True, help='Path to the ontology definition markdown file')
+    serve_parser.add_argument('--input-file', type=str, required=True, help='Path to the ontology definition input file (.md or .tql)')
     serve_parser.add_argument('--host', type=str, default='127.0.0.1', help='Host interface for the local HTTP server')
     serve_parser.add_argument('--port', type=int, default=8000, help='Port for the local HTTP server')
 
