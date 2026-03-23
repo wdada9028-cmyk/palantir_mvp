@@ -1,6 +1,6 @@
 ﻿from pathlib import Path
 
-import cloud_delivery_ontology_palantir.cli as cli_module
+import cloud_delivery_ontology_palantir.pipelines.build_ontology_pipeline as pipeline_module
 from cloud_delivery_ontology_palantir.cli import main
 
 
@@ -14,53 +14,26 @@ def test_build_ontology_cli_generates_outputs(tmp_path: Path):
     assert (output_dir / 'ontology.html').exists()
 
 
-def test_build_ontology_cli_accepts_tql_input_and_delegates_to_pipeline(tmp_path: Path, monkeypatch):
+def test_build_ontology_cli_with_tql_uses_pipeline_resolution_before_build(tmp_path: Path, monkeypatch):
     input_file = tmp_path / 'ontology.tql'
     input_file.write_text('SELECT * FROM ontology;', encoding='utf-8')
+    converted_md = tmp_path / 'ontology.converted.md'
+    converted_md.write_text(
+        '# Test Ontology\n\n## 4. Object Types\n### `Project`\n中文释义：项目\n关键属性：\n- `project_id`: 项目ID\n',
+        encoding='utf-8',
+    )
     output_dir = tmp_path / 'output'
 
-    build_calls: list[dict[str, object]] = []
+    resolver_calls: list[Path] = []
 
-    def fake_build_ontology_from_markdown(
-        input_file: str | Path,
-        output_dir: str | Path,
-        *,
-        generate_html: bool,
-        generate_pdf: bool,
-    ) -> dict[str, object]:
-        build_calls.append(
-            {
-                'input_file': Path(input_file),
-                'output_dir': Path(output_dir),
-                'generate_html': generate_html,
-                'generate_pdf': generate_pdf,
-            }
-        )
-        out_dir = Path(output_dir)
-        out_dir.mkdir(parents=True, exist_ok=True)
-        ontology_json = out_dir / 'ontology.json'
-        schema_summary_json = out_dir / 'schema_summary.json'
-        ontology_html = out_dir / 'ontology.html'
-        ontology_json.write_text('{}', encoding='utf-8')
-        schema_summary_json.write_text('{}', encoding='utf-8')
-        ontology_html.write_text('<html></html>', encoding='utf-8')
-        return {
-            'ontology_json': ontology_json,
-            'schema_summary_json': schema_summary_json,
-            'ontology_html': ontology_html,
-        }
+    def fake_resolve_input_to_markdown(path: str | Path) -> Path:
+        resolver_calls.append(Path(path))
+        return converted_md
 
-    monkeypatch.setattr(cli_module, 'build_ontology_from_markdown', fake_build_ontology_from_markdown)
+    monkeypatch.setattr(pipeline_module, 'resolve_input_to_markdown', fake_resolve_input_to_markdown, raising=False)
 
     assert main(['build-ontology', '--input-file', str(input_file), '--output-dir', str(output_dir)]) == 0
-    assert build_calls == [
-        {
-            'input_file': input_file,
-            'output_dir': output_dir,
-            'generate_html': True,
-            'generate_pdf': False,
-        }
-    ]
+    assert resolver_calls == [input_file]
     assert (output_dir / 'ontology.json').exists()
     assert (output_dir / 'schema_summary.json').exists()
     assert (output_dir / 'ontology.html').exists()

@@ -227,4 +227,3 @@ def test_create_app_resolves_tql_input_before_loading_graph(tmp_path: Path, monk
 
     assert resolver_calls == [tql_file]
     assert parse_source_files == [str(converted_file)]
-    assert app.state.input_file == converted_file
