@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 
@@ -14,15 +14,30 @@ from .definition_models import (
 
 _H2_RE = re.compile(r'^##\s+(.+)$')
 _H3_RE = re.compile(r'^###\s+(.+)$')
-_OBJECT_HEADING_RE = re.compile(r'^###\s+`([^`]+)`\s*$')
+_H4_RE = re.compile(r'^####\s+(.+)$')
+_OBJECT_HEADING_RE = re.compile(r'^(?:###|####)\s+`([^`]+)`\s*$')
 _LIST_ITEM_RE = re.compile(r'^(?:[-*]|\d+\.)\s+(.*)$')
-_NAMED_ITEM_RE = re.compile(r'^`([^`]+)`\s*[：:]\s*(.+)$')
-_RELATION_ITEM_RE = re.compile(r'^`([^`\s]+)\s+([A-Z_]+)\s+([^`\s]+)`\s*[：:]\s*(.+)$')
+_NAMED_ITEM_RE = re.compile(r'^`([^`]+)`\s*[\uFF1A:]\s*(.+)$')
+_RELATION_ITEM_RE = re.compile(r'^`([^`\s]+)\s+([A-Z_]+)\s+([^`\s]+)`\s*[\uFF1A:]\s*(.+)$')
+_OBJECT_SECTION_HEADINGS = {'4. Object Types', 'Object Types\uff08\u5b9e\u4f53\uff09', 'Object Types'}
+_LINK_SECTION_HEADINGS = {'5. Link Types', 'Link Types\uff08\u5173\u7cfb\uff09', 'Link Types'}
+_BOUNDARY_HEADING = '2. \u5f53\u524d\u5efa\u6a21\u8fb9\u754c'
+_MAINLINE_HEADING = '3. \u672c\u4f53\u4e3b\u7ebf'
+_OPTIONAL_HEADING = '4.7 MVP \u6682\u4e0d\u5f3a\u5236\u7684\u8865\u5145\u5c5e\u6027'
+_DERIVED_HEADING = '6. \u5173\u952e\u6d3e\u751f\u6307\u6807'
+_LABEL_ZH = '\u4e2d\u6587\u91ca\u4e49'
+_LABEL_SEMANTIC = '\u8bed\u4e49\u5b9a\u4e49'
+_LABEL_KEY_PROPERTIES = '\u5173\u952e\u5c5e\u6027'
+_LABEL_STATUS = '\u72b6\u6001\u5efa\u8bae'
+_LABEL_RULES = '\u89c4\u5219\u7ea6\u675f'
+_LABEL_VIOLATIONS = '\u5efa\u8bae\u7684\u8fdd\u89c4\u7c7b\u578b'
+_LABEL_NOTES = '\u8bf4\u660e'
+_LABEL_NAMING = '\u547d\u540d\u5efa\u8bae'
+_LABEL_EXTRA_NOTES = '\u8865\u5145\u8bf4\u660e'
 
 
 class _ParseError(ValueError):
     pass
-
 
 
 def parse_definition_markdown(text: str, source_file: str | None = None) -> OntologyDefinitionSpec:
@@ -50,28 +65,31 @@ def parse_definition_markdown(text: str, source_file: str | None = None) -> Onto
                 current_object.source_end_line = line_no - 1
                 current_object = None
             current_h2 = h2_match.group(1).strip()
-            if current_h2.startswith('4.') and current_h2 not in {'4. Object Types', '4.7 MVP 暂不强制的补充属性'}:
+            if current_h2.startswith('4.') and current_h2 not in {'4. Object Types', _OPTIONAL_HEADING}:
                 current_group = current_h2
+            elif _is_object_section_heading(current_h2):
+                current_group = ''
             current_submode = None
             in_optional_notes = False
             continue
 
-        if current_h2 == '2. 当前建模边界':
+        if current_h2 == _BOUNDARY_HEADING:
             item = _extract_list_or_ordered_text(line)
             if item:
                 spec.boundaries.append(item)
             continue
 
-        if current_h2 == '3. 本体主线':
+        if current_h2 == _MAINLINE_HEADING:
             if line == '---' or ('`' not in line and '->' not in line):
                 continue
             cleaned = [part.strip().strip('`') for part in line.split('->') if part.strip() and part.strip() != '---']
             spec.mainline.extend(cleaned)
             continue
 
-        if current_h2 == '4. Object Types' or (current_h2.startswith('4.') and current_h2 != '4.7 MVP 暂不强制的补充属性'):
+        if _is_object_section_heading(current_h2) or (current_h2.startswith('4.') and current_h2 != _OPTIONAL_HEADING):
             h3_match = _H3_RE.match(line)
-            if h3_match:
+            h4_match = _H4_RE.match(line)
+            if h3_match or h4_match:
                 object_heading = _OBJECT_HEADING_RE.match(line)
                 if object_heading:
                     if current_object is not None and current_object.source_end_line is None:
@@ -84,28 +102,29 @@ def parse_definition_markdown(text: str, source_file: str | None = None) -> Onto
                     spec.object_types.append(current_object)
                     current_submode = None
                     continue
-                current_group = h3_match.group(1).strip()
+                if h3_match:
+                    current_group = h3_match.group(1).strip()
                 current_submode = None
                 continue
 
             if current_object is None:
                 continue
 
-            if _has_label(line, '中文释义'):
+            if _has_label(line, _LABEL_ZH):
                 current_object.chinese_description = _strip_label(line)
                 continue
-            if _has_label(line, '语义定义'):
+            if _has_label(line, _LABEL_SEMANTIC):
                 current_object.semantic_definition = _strip_label(line)
                 continue
 
             mode_label_map = {
-                '关键属性': 'key_properties',
-                '状态建议': 'status_values',
-                '规则约束': 'rules',
-                '建议的违规类型': 'suggested_violation_types',
-                '说明': 'notes',
-                '命名建议': 'notes',
-                '补充说明': 'notes',
+                _LABEL_KEY_PROPERTIES: 'key_properties',
+                _LABEL_STATUS: 'status_values',
+                _LABEL_RULES: 'rules',
+                _LABEL_VIOLATIONS: 'suggested_violation_types',
+                _LABEL_NOTES: 'notes',
+                _LABEL_NAMING: 'notes',
+                _LABEL_EXTRA_NOTES: 'notes',
             }
             matched_mode = next((label for label in mode_label_map if _is_block_label(line, label)), None)
             if matched_mode is not None:
@@ -130,8 +149,8 @@ def parse_definition_markdown(text: str, source_file: str | None = None) -> Onto
                     current_object.notes.append(item)
                 continue
 
-        if current_h2 == '4.7 MVP 暂不强制的补充属性':
-            if _is_block_label(line, '补充说明'):
+        if current_h2 == _OPTIONAL_HEADING:
+            if _is_block_label(line, _LABEL_EXTRA_NOTES):
                 in_optional_notes = True
                 continue
             item_match = _LIST_ITEM_RE.match(line)
@@ -144,9 +163,9 @@ def parse_definition_markdown(text: str, source_file: str | None = None) -> Onto
                     spec.optional_properties.append(PropertySpec(name=name, description=description, line_no=line_no))
             continue
 
-        if current_h2 == '5. Link Types':
+        if _is_link_section_heading(current_h2):
             h3_match = _H3_RE.match(line)
-            if h3_match:
+            if h3_match and not _OBJECT_HEADING_RE.match(line):
                 current_relation_group = h3_match.group(1).strip()
                 continue
             item_match = _LIST_ITEM_RE.match(line)
@@ -164,7 +183,7 @@ def parse_definition_markdown(text: str, source_file: str | None = None) -> Onto
                 )
             continue
 
-        if current_h2 == '6. 关键派生指标':
+        if current_h2 == _DERIVED_HEADING:
             item_match = _LIST_ITEM_RE.match(line)
             if item_match:
                 name, description = _parse_named_item(item_match.group(1).strip(), line_no)
@@ -176,7 +195,6 @@ def parse_definition_markdown(text: str, source_file: str | None = None) -> Onto
 
     _validate_spec(spec)
     return spec
-
 
 
 def _validate_spec(spec: OntologyDefinitionSpec) -> None:
@@ -208,28 +226,23 @@ def _validate_spec(spec: OntologyDefinitionSpec) -> None:
         seen_relations.add(key)
 
 
-
 def _extract_list_or_ordered_text(line: str) -> str:
     match = _LIST_ITEM_RE.match(line)
     return match.group(1).strip() if match else ''
 
 
-
 def _has_label(line: str, label: str) -> bool:
-    return line.startswith(f'{label}：') or line.startswith(f'{label}:')
-
+    return line.startswith(f'{label}\uff1a') or line.startswith(f'{label}:')
 
 
 def _is_block_label(line: str, label: str) -> bool:
-    return line == f'{label}：' or line == f'{label}:' or _has_label(line, label)
-
+    return line == f'{label}\uff1a' or line == f'{label}:' or _has_label(line, label)
 
 
 def _strip_label(line: str) -> str:
-    if '：' in line:
-        return line.split('：', 1)[1].strip()
+    if '\uff1a' in line:
+        return line.split('\uff1a', 1)[1].strip()
     return line.split(':', 1)[1].strip()
-
 
 
 def _parse_named_item(text: str, line_no: int) -> tuple[str, str]:
@@ -239,13 +252,19 @@ def _parse_named_item(text: str, line_no: int) -> tuple[str, str]:
     return match.group(1), match.group(2).strip()
 
 
-
 def _parse_relation_item(text: str, line_no: int) -> tuple[str, str, str, str]:
     match = _RELATION_ITEM_RE.match(text)
     if not match:
         _fail(line_no, f'malformed relation entry, expected `Source RELATION Target`: {text}')
     return match.group(1), match.group(2), match.group(3), match.group(4).strip()
 
+
+def _is_object_section_heading(heading: str) -> bool:
+    return heading in _OBJECT_SECTION_HEADINGS
+
+
+def _is_link_section_heading(heading: str) -> bool:
+    return heading in _LINK_SECTION_HEADINGS
 
 
 def _fail(line_no: int, message: str) -> None:
