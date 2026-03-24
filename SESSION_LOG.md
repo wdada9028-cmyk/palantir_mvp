@@ -2,15 +2,29 @@
 
 ## Current State
 - Agent: Codex
-- Branch: detached HEAD @ current worktree snapshot
-- Last session: 2026-03-24 19:46
-- Active work: ontology graph UI now hides group labels for ungrouped object types while preserving grouped behavior; changes not committed
+- Branch: codex/main2
+- Last session: 2026-03-24 20:44
+- Active work: merged deterministic tql ontology workflow updates from worktree f742 into codex/main2 and verified tests pass
 - Blockers: None
 - Next steps:
-  - If needed, rebuild or serve the ontology UI and visually verify an ungrouped object node no longer shows group text
-  - Decide whether to continue slimming leftover legacy docs/tests around the retired LLM conversion path
+  - Use `typedb_schema_v4.tql` or `typedb_schema_v4.converted.md` to build or serve the ontology locally
+  - Continue follow-up cleanup only if more slimming of legacy docs/tests is desired
 
 ## Session History
+
+### 2026-03-24 20:44 - Codex
+**What was done:**
+- Fast-forward merged worktree `C:/Users/w00949875/.codex/worktrees/f742/palantir_mvp` commit `6ca862a` into `codex/main2`
+- Brought over the deterministic `.tql -> .md` conversion pipeline, renderer/test updates, skill files, sample schema files, and graph UI changes
+- Ran `pytest tests -q` in `D:/????/AI?????/??????/palantir_mvp` and got `80 passed`
+
+**Decisions made:**
+- Kept editor metadata directories (`.idea/`) out of the merge
+- Merged into the local main worktree without deleting the source worktree
+
+**Open questions:**
+- None
+
 
 ### 2026-03-24 19:46 - Codex
 **What was done:**
