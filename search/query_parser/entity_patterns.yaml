@@ -1,0 +1,14 @@
+PlacementPlan:
+  root_terms:
+    - 落位
+  suffix_terms:
+    - 方案
+    - 计划
+    - 建议方案
+
+ConstraintViolation:
+  root_terms:
+    - 约束
+  suffix_terms:
+    - 冲突
+    - 冲突项

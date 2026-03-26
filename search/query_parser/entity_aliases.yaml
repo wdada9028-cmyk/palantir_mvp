@@ -1,0 +1,60 @@
+Room:
+  - 机房
+  - 机房空间
+  - 机房交付区域
+
+PoD:
+  - PoD
+  - PoD单元
+  - PoD交付单元
+  - PoD机柜
+
+PoDPosition:
+  - PoD落位
+  - 落位点
+  - 落位位置
+
+PoDSchedule:
+  - PoD排期
+  - PoD安装计划
+  - PoD施工排期
+
+ActivityInstance:
+  - 施工活动
+  - 活动实例
+  - 作业活动
+
+ActivityTemplate:
+  - 活动模板
+  - 施工模板
+
+ActivityDependencyTemplate:
+  - 活动依赖模板
+  - 依赖模板
+
+WorkAssignment:
+  - 施工分配
+  - 施工安排
+  - 作业分派
+
+Crew:
+  - 施工队
+  - 班组
+
+ArrivalPlan:
+  - 到货建议方案
+  - 到货计划
+
+PlacementPlan:
+  - 落位建议方案
+  - 落位计划
+  - 落位方案
+
+
+ConstraintViolation:
+  - 约束冲突
+  - 冲突项
+
+DecisionRecommendation:
+  - 决策建议
+  - 推荐建议

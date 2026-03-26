@@ -28,7 +28,13 @@ class _IntentResolverConfig:
     model: str
 
 
-def resolve_intent(graph: OntologyGraph, query: str, *, timeout_s: float = 3.0) -> IntentResolution:
+def resolve_intent(
+    graph: OntologyGraph,
+    query: str,
+    *,
+    candidate_ids: list[str] | None = None,
+    timeout_s: float = 3.0,
+) -> IntentResolution:
     config = _load_config()
     if config is None:
         return IntentResolution(
@@ -38,7 +44,13 @@ def resolve_intent(graph: OntologyGraph, query: str, *, timeout_s: float = 3.0) 
             error='Missing QWEN_API_BASE or QWEN_API_KEY.',
         )
 
-    object_ids = {obj.id for obj in _iter_prompt_objects(graph)}
+    if candidate_ids is None:
+        object_ids = {obj.id for obj in _iter_prompt_objects(graph)}
+        success_source = 'llm'
+    else:
+        candidate_id_set = {str(item) for item in candidate_ids if isinstance(item, str)}
+        object_ids = {obj.id for obj in _iter_prompt_objects(graph) if obj.id in candidate_id_set}
+        success_source = 'llm_candidate_select'
     if not object_ids:
         return IntentResolution(
             seeds=[],
@@ -63,7 +75,7 @@ def resolve_intent(graph: OntologyGraph, query: str, *, timeout_s: float = 3.0) 
             },
             {
                 'role': 'user',
-                'content': _build_prompt(graph, query),
+                'content': _build_prompt(graph, query, object_ids=object_ids),
             },
         ],
     }
@@ -97,7 +109,7 @@ def resolve_intent(graph: OntologyGraph, query: str, *, timeout_s: float = 3.0) 
                 source='fallback',
                 error='Resolver returned no valid ontology seed IDs.',
             )
-        return IntentResolution(seeds=filtered, reasoning=reasoning, source='llm', error='')
+        return IntentResolution(seeds=filtered, reasoning=reasoning, source=success_source, error='')
     except Exception as exc:
         return IntentResolution(seeds=[], reasoning='', source='fallback', error=_format_error(exc))
 
@@ -123,8 +135,8 @@ def _load_config() -> _IntentResolverConfig | None:
     )
 
 
-def _build_prompt(graph: OntologyGraph, query: str) -> str:
-    ontology_text = _build_schema_summary(graph)
+def _build_prompt(graph: OntologyGraph, query: str, *, object_ids: set[str] | None = None) -> str:
+    ontology_text = _build_schema_summary(graph, object_ids=object_ids)
     return (
         f'User question: {query}\n\n'
         'Ontology entities:\n'
@@ -134,9 +146,11 @@ def _build_prompt(graph: OntologyGraph, query: str) -> str:
     )
 
 
-def _build_schema_summary(graph: OntologyGraph) -> str:
+def _build_schema_summary(graph: OntologyGraph, *, object_ids: set[str] | None = None) -> str:
     lines: list[str] = []
     for obj in _iter_prompt_objects(graph):
+        if object_ids is not None and obj.id not in object_ids:
+            continue
         description = str(obj.attributes.get('chinese_description', '') or '').strip()
         if not description:
             description = str(obj.name or obj.id.split(':', 1)[-1]).strip() or obj.id

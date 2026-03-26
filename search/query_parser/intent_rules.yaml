@@ -1,0 +1,59 @@
+impact_analysis:
+  priority: 100
+  keywords:
+    - 影响
+    - 风险
+    - 延期
+    - 延误
+    - 波及
+    - 受影响
+
+dependency_analysis:
+  priority: 90
+  keywords:
+    - 依赖
+    - 前置
+    - 前置条件
+    - 依靠
+    - 需要哪些资源
+
+process_query:
+  priority: 80
+  keywords:
+    - 流程
+    - 步骤
+    - 经过哪些
+    - 如何安排
+    - 怎么排
+    - 排期
+    - 如何执行
+
+constraint_query:
+  priority: 70
+  keywords:
+    - 约束
+    - 冲突
+    - 违反
+    - 约束冲突
+
+relation_query:
+  priority: 60
+  keywords:
+    - 关系
+    - 关联
+    - 对应
+    - 连接
+
+definition_query:
+  priority: 50
+  keywords:
+    - 是什么
+    - 定义
+    - 含义
+
+listing_query:
+  priority: 40
+  keywords:
+    - 有哪些
+    - 哪些
+    - 列出
