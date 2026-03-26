@@ -251,3 +251,55 @@ def test_exported_html_contains_streaming_answer_and_trace_sections(tmp_path: Pa
     assert 'answer_text_so_far' in text
     assert 'qa-answer-text' in text
     assert 'qa-trace-report' in text
+
+
+
+def test_build_graph_payload_does_not_append_group_text_for_ungrouped_object_type():
+    from cloud_delivery_ontology_palantir.export.graph_export import build_graph_payload
+
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    graph.add_object(
+        OntologyObject(
+            id='object_type:Project',
+            type='ObjectType',
+            name='Project',
+            attributes={
+                'group': '',
+                'semantic_definition': '',
+                'key_properties': [{'name': 'project_id', 'description': 'Project ID'}],
+            },
+        )
+    )
+
+    payload = build_graph_payload(graph)
+    project = next(item for item in payload['elements'] if item['data']['id'] == 'object_type:Project')
+
+    assert project['data']['label'] == 'Project'
+    assert project['data']['attributes']['display_group'] == ''
+
+
+
+def test_exported_html_hides_group_chip_for_ungrouped_object_type(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    graph.add_object(
+        OntologyObject(
+            id='object_type:Project',
+            type='ObjectType',
+            name='Project',
+            attributes={
+                'group': '',
+                'chinese_description': '??',
+                'semantic_definition': '',
+                'key_properties': [{'name': 'project_id', 'description': '??ID'}],
+            },
+        )
+    )
+
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'const groupChipHtml = attrs.display_group ?' in text
+    assert "<span class=\"group-chip\">${attrs.display_group}</span>" in text
+    assert 'attrs.display_group ||' not in text
+    assert '"label": "Project"' in text
+    assert '"label": "Project\\n' not in text

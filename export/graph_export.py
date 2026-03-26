@@ -765,22 +765,23 @@ window.cytoscape = window.cytoscape || cytoscape;
       )].sort();
       const hasRelationSummary = relationTypes.length > 0 || inRelations.length > 0 || outRelations.length > 0;
       const relationSummaryHtml = hasRelationSummary
-        ? `<div class="detail-card"><div class="section-title">关系摘要</div><div class="summary-box"><strong>入边：</strong>${inRelations.length} &nbsp; <strong>出边：</strong>${outRelations.length}</div><div style="height:8px"></div><div class="pill-row">${relationTypes.length ? relationTypes.map(item => `<span class="pill">${item}</span>`).join('') : '<span class=\"muted\">\u65e0</span>'}</div><div class="actions"><button id="toggle-relations">展开关系明细</button></div></div><div id="relation-details" class="hidden">${renderRelations('入边明细', inRelations)}${renderRelations('出边明细', outRelations)}</div>`
+        ? `<div class="detail-card"><div class="section-title">关系摘要</div><div class="summary-box"><strong>入边：</strong>${inRelations.length} &nbsp; <strong>出边：</strong>${outRelations.length}</div><div style="height:8px"></div><div class="pill-row">${relationTypes.length ? relationTypes.map(item => `<span class="pill">${item}</span>`).join('') : '<span class=\"muted\">\u65e0</span>'}</div><div class="actions"><button id="toggle-relations">展开关系明细</button></div></div><div id="relation-details" class="hidden">${renderRelations('\u5165\u8fb9\u660e\u7ec6', inRelations)}${renderRelations('\u51fa\u8fb9\u660e\u7ec6', outRelations)}</div>`
         : '';
+      const groupChipHtml = attrs.display_group ? `<span class="group-chip">${attrs.display_group}</span>` : '';
       const htmlContent = `
         <div class="hero-card">
           <div class="hero-title">${data.display_name}</div>
           <div class="hero-subtitle">
             <span class="type-chip">${data.type}</span>
-            <span class="group-chip">${attrs.display_group || '未分组'}</span>
+            ${groupChipHtml}
           </div>
         </div>
         ${renderSection('\u4e2d\u6587\u91ca\u4e49', `<p class=\"detail-text\">${attrs.chinese_description || attrs.description}</p>`, Boolean(attrs.chinese_description || attrs.description))}
         ${renderSection('\u8bed\u4e49\u5b9a\u4e49', `<p class=\"detail-text\">${attrs.semantic_definition}</p>`, Boolean(attrs.semantic_definition))}
-        ${renderSection('关键属性', formatPropertyLines(attrs.key_property_lines || []), hasStringList(attrs.key_property_lines))}
-        ${renderSection('状态建议', formatPropertyLines(attrs.status_value_lines || []), hasStringList(attrs.status_value_lines))}
-        ${renderSection('规则约束', formatStringList(attrs.rule_lines || attrs.rules || []), hasStringList(attrs.rule_lines || attrs.rules))}
-        ${renderSection('说明', formatStringList(attrs.note_lines || attrs.notes || []), hasStringList(attrs.note_lines || attrs.notes))}
+        ${renderSection('\u5173\u952e\u5c5e\u6027', formatPropertyLines(attrs.key_property_lines || []), hasStringList(attrs.key_property_lines))}
+        ${renderSection('\u72b6\u6001\u5efa\u8bae', formatPropertyLines(attrs.status_value_lines || []), hasStringList(attrs.status_value_lines))}
+        ${renderSection('\u89c4\u5219\u7ea6\u675f', formatStringList(attrs.rule_lines || attrs.rules || []), hasStringList(attrs.rule_lines || attrs.rules))}
+        ${renderSection('\u8bf4\u660e', formatStringList(attrs.note_lines || attrs.notes || []), hasStringList(attrs.note_lines || attrs.notes))}
         ${relationSummaryHtml}
       `;
       showInlineDetailCard(node, htmlContent);
@@ -1019,22 +1020,29 @@ def build_graph_payload(graph: OntologyGraph) -> dict[str, object]:
     for obj in objects:
         attrs = dict(obj.attributes)
         raw_group = attrs.get('group', '')
-        display_group = _strip_group_prefix(raw_group) or '未分组'
+        display_group = _strip_group_prefix(raw_group)
         attrs['display_group'] = display_group
         attrs['key_property_lines'] = _named_items_to_lines(attrs.get('key_properties'))
         attrs['status_value_lines'] = _named_items_to_lines(attrs.get('status_values'))
         attrs['rule_lines'] = _string_items_to_lines(attrs.get('rules'))
         attrs['note_lines'] = _string_items_to_lines(attrs.get('notes'))
+        label = f"{obj.name}\n{display_group}" if display_group else obj.name
+        search_tokens = [obj.name]
+        if display_group:
+            search_tokens.append(display_group)
+        if raw_group:
+            search_tokens.append(raw_group)
+        search_tokens.append(json.dumps(attrs, ensure_ascii=False))
         elements.append(
             {
                 'data': {
                     'id': obj.id,
-                    'label': f"{obj.name}\n{display_group}",
+                    'label': label,
                     'display_name': obj.name,
                     'type': obj.type,
                     'attributes': attrs,
                     'color': _color_for_group(display_group, obj.type),
-                    'search_text': f"{obj.name} {display_group} {raw_group} {json.dumps(attrs, ensure_ascii=False)}".lower(),
+                    'search_text': ' '.join(search_tokens).lower(),
                 },
                 'position': positions[obj.id],
             }

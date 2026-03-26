@@ -1,0 +1,30 @@
+openapi: 3.1.0
+info:
+  title: TQL Markdown Reviser
+  description: 自动纠正 TQL 转换后的 Markdown 极性错误、翻译实体名并统一半角格式。
+  version: 1.0.0
+paths:
+  /revise:
+    post:
+      operationId: revise_tql_markdown
+      description: 运行 Python 脚本对 Markdown 内容进行本体逻辑审计与格式化
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+                  description: 需要审计的原始 Markdown 文本
+      responses:
+        "200":
+          description: 返回修正后的完美 Markdown
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  revised_content:
+                    type: string

@@ -1,0 +1,552 @@
+# TypeDB 3.x schema v3
+# Reviewed against official TypeDB docs:
+# - entities / relations / attributes
+# - owns / plays / relates
+# - subtyping and abstract types
+#
+# Sources used:
+# https://typedb.com/docs/core-concepts/typeql/entities-relations-attributes
+# https://typedb.com/docs/reference/typeql/schema/define
+# https://typedb.com/docs/home/get-started/schema/
+# https://typedb.com/docs/typeql/2.x/statements/plays
+# https://typedb.com/docs/typeql/2.x/statements/owns
+
+define
+
+# =========================
+# Attribute Types
+# =========================
+
+attribute project-id, value string;
+attribute project-name, value string;
+attribute project-status, value string;
+attribute product-type, value string;
+attribute cooling-mode, value string;
+attribute project-scene, value string;
+attribute planned-start-date, value datetime;
+
+attribute building-id, value string;
+attribute building-name, value string;
+
+attribute floor-id, value string;
+attribute floor-no, value integer;
+attribute install-sequence, value integer;
+
+attribute room-id, value string;
+attribute room-type, value string;
+attribute max-pod-capacity, value integer;
+attribute required-handover-pod-count, value integer;
+attribute room-status, value string;
+
+attribute position-id, value string;
+attribute position-code, value string;
+attribute position-status, value string;
+attribute sequence-no, value integer;
+
+attribute pod-id, value string;
+attribute pod-code, value string;
+attribute pod-type, value string;
+attribute pod-status, value string;
+attribute planned-arrival-time, value datetime;
+attribute actual-arrival-time, value datetime;
+attribute planned-install-start-time, value datetime;
+attribute actual-install-start-time, value datetime;
+attribute planned-handover-time, value datetime;
+attribute actual-handover-time, value datetime;
+
+attribute milestone-id, value string;
+attribute proposed-by, value string;
+attribute due-time, value datetime;
+attribute priority, value integer;
+attribute milestone-status, value string;
+attribute target-pod-count, value integer;
+attribute required-room-count, value integer;
+attribute completed-room-count, value integer;
+attribute completion-event-code, value string;
+attribute completion-event-name, value string;
+
+attribute shipment-id, value string;
+attribute shipment-no, value string;
+attribute shipment-status, value string;
+attribute planned-ship-time, value datetime;
+
+attribute arrival-event-id, value string;
+attribute arrival-status, value string;
+attribute receiving-location, value string;
+attribute confirmed-by, value string;
+
+attribute arrival-plan-id, value string;
+attribute recommended-arrival-time, value datetime;
+attribute latest-safe-arrival-time, value datetime;
+attribute earliest-useful-arrival-time, value datetime;
+attribute backlog-risk-level, value string;
+attribute plan-status, value string;
+
+attribute template-id, value string;
+attribute l1-code, value string;
+attribute l1-name, value string;
+attribute l2-code, value string;
+attribute l2-name, value string;
+attribute activity-category, value string;
+attribute completion-flag, value boolean;
+attribute scenario-tag, value string;
+
+attribute dependency-template-id, value string;
+attribute dependency-type, value string;
+
+attribute sla-id, value string;
+attribute standard-duration, value integer;
+attribute duration-unit, value string;
+attribute crew-capacity-assumption, value integer;
+
+attribute activity-id, value string;
+attribute activity-status, value string;
+attribute planned-start-time, value datetime;
+attribute planned-finish-time, value datetime;
+attribute latest-start-time, value datetime;
+attribute latest-finish-time, value datetime;
+attribute actual-start-time, value datetime;
+attribute actual-finish-time, value datetime;
+attribute is-milestone-anchor, value boolean;
+
+attribute pod-schedule-id, value string;
+attribute schedule-type, value string;
+attribute generated-at, value datetime;
+attribute is-feasible, value boolean;
+
+attribute crew-id, value string;
+attribute crew-status, value string;
+attribute daily-pod-capacity, value integer;
+attribute parallel-limit, value integer;
+
+attribute assignment-id, value string;
+attribute assignment-date, value datetime;
+attribute start-time, value datetime;
+attribute finish-time, value datetime;
+attribute assignment-status, value string;
+
+attribute placement-plan-id, value string;
+attribute placement-score, value double;
+
+attribute violation-id, value string;
+attribute violation-type, value string;
+attribute severity, value string;
+attribute message, value string;
+
+attribute recommendation-id, value string;
+attribute recommendation-type, value string;
+attribute recommendation-text, value string;
+attribute confidence, value double;
+attribute created-at, value datetime;
+
+
+# =========================
+# Relation Types
+# =========================
+
+relation project-building,
+  relates owner-project,
+  relates owned-building;
+
+relation building-floor,
+  relates owner-building,
+  relates owned-floor;
+
+relation floor-room,
+  relates owner-floor,
+  relates owned-room;
+
+relation room-position,
+  relates owner-room,
+  relates owned-position;
+
+relation project-pod,
+  relates owner-project,
+  relates owned-pod;
+
+relation project-crew,
+  relates owner-project,
+  relates owned-crew;
+
+relation project-shipment,
+  relates owner-project,
+  relates owned-shipment;
+
+relation project-room-milestone,
+  relates owner-project,
+  relates owned-room-milestone;
+
+relation project-floor-milestone,
+  relates owner-project,
+  relates owned-floor-milestone;
+
+relation room-milestone-constraint,
+  relates constraining-room-milestone,
+  relates constrained-room;
+
+relation floor-milestone-constraint,
+  relates constraining-floor-milestone,
+  relates constrained-floor;
+
+relation floor-room-milestone-aggregation,
+  relates owner-floor-milestone,
+  relates member-room-milestone;
+
+relation pod-building-assignment,
+  relates assigned-pod,
+  relates assigned-building;
+
+relation pod-floor-assignment,
+  relates assigned-pod,
+  relates assigned-floor;
+
+relation pod-room-assignment,
+  relates assigned-pod,
+  relates assigned-room;
+
+relation pod-position-assignment,
+  relates assigned-pod,
+  relates assigned-position;
+
+relation shipment-pod,
+  relates shipping-shipment,
+  relates shipped-pod;
+
+relation pod-arrival-event,
+  relates owning-pod,
+  relates owned-arrival-event;
+
+relation arrival-plan-pod,
+  relates planning-arrival-plan,
+  relates planned-pod;
+
+relation pod-activity,
+  relates owning-pod,
+  relates owned-activity;
+
+relation activity-template-instance,
+  relates source-template,
+  relates generated-instance;
+
+relation activity-template-sla,
+  relates constrained-template,
+  relates applied-sla;
+
+relation activity-instance-dependency,
+  relates predecessor-activity,
+  relates successor-activity;
+
+relation template-dependency-link,
+  relates dependency-record,
+  relates predecessor-template,
+  relates successor-template;
+
+relation pod-schedule-pod,
+  relates owning-schedule,
+  relates scheduled-pod;
+
+relation pod-schedule-activity,
+  relates owning-schedule,
+  relates scheduled-activity;
+
+relation crew-work-assignment,
+  relates executing-crew,
+  relates executed-assignment;
+
+relation work-assignment-pod,
+  relates assignment-record,
+  relates assigned-pod;
+
+relation work-assignment-room,
+  relates assignment-record,
+  relates assigned-room;
+
+relation work-assignment-position,
+  relates assignment-record,
+  relates assigned-position;
+
+relation placement-plan-pod,
+  relates planning-placement,
+  relates planned-pod;
+
+relation placement-plan-building,
+  relates planning-placement,
+  relates planned-building;
+
+relation placement-plan-floor,
+  relates planning-placement,
+  relates planned-floor;
+
+relation placement-plan-room,
+  relates planning-placement,
+  relates planned-room;
+
+relation placement-plan-position,
+  relates planning-placement,
+  relates planned-position;
+
+relation violation-pod,
+  relates violation-record,
+  relates violated-pod;
+
+relation violation-room-milestone,
+  relates violation-record,
+  relates violated-room-milestone;
+
+relation violation-floor-milestone,
+  relates violation-record,
+  relates violated-floor-milestone;
+
+relation recommendation-arrival-plan,
+  relates recommendation-record,
+  relates referenced-arrival-plan;
+
+relation recommendation-placement-plan,
+  relates recommendation-record,
+  relates referenced-placement-plan;
+
+relation recommendation-violation,
+  relates recommendation-record,
+  relates referenced-violation;
+
+
+# =========================
+# Entity Types
+# =========================
+
+entity project,
+  owns project-id @key,
+  owns project-name,
+  owns project-status,
+  owns product-type,
+  owns cooling-mode,
+  owns project-scene,
+  owns planned-start-date,
+  plays project-building:owner-project,
+  plays project-pod:owner-project,
+  plays project-crew:owner-project,
+  plays project-shipment:owner-project,
+  plays project-room-milestone:owner-project,
+  plays project-floor-milestone:owner-project;
+
+entity building,
+  owns building-id @key,
+  owns building-name,
+  plays project-building:owned-building,
+  plays building-floor:owner-building,
+  plays pod-building-assignment:assigned-building,
+  plays placement-plan-building:planned-building;
+
+entity floor,
+  owns floor-id @key,
+  owns floor-no,
+  owns install-sequence,
+  plays building-floor:owned-floor,
+  plays floor-room:owner-floor,
+  plays floor-milestone-constraint:constrained-floor,
+  plays pod-floor-assignment:assigned-floor,
+  plays placement-plan-floor:planned-floor;
+
+entity room,
+  owns room-id @key,
+  owns room-type,
+  owns max-pod-capacity,
+  owns required-handover-pod-count,
+  owns room-status,
+  plays floor-room:owned-room,
+  plays room-position:owner-room,
+  plays room-milestone-constraint:constrained-room,
+  plays pod-room-assignment:assigned-room,
+  plays work-assignment-room:assigned-room,
+  plays placement-plan-room:planned-room;
+
+entity pod-position,
+  owns position-id @key,
+  owns position-code,
+  owns position-status,
+  owns sequence-no,
+  plays room-position:owned-position,
+  plays pod-position-assignment:assigned-position,
+  plays work-assignment-position:assigned-position,
+  plays placement-plan-position:planned-position;
+
+entity pod,
+  owns pod-id @key,
+  owns pod-code,
+  owns pod-type,
+  owns pod-status,
+  owns planned-arrival-time,
+  owns actual-arrival-time,
+  owns planned-install-start-time,
+  owns actual-install-start-time,
+  owns planned-handover-time,
+  owns actual-handover-time,
+  plays project-pod:owned-pod,
+  plays pod-building-assignment:assigned-pod,
+  plays pod-floor-assignment:assigned-pod,
+  plays pod-room-assignment:assigned-pod,
+  plays pod-position-assignment:assigned-pod,
+  plays shipment-pod:shipped-pod,
+  plays pod-arrival-event:owning-pod,
+  plays arrival-plan-pod:planned-pod,
+  plays pod-activity:owning-pod,
+  plays pod-schedule-pod:scheduled-pod,
+  plays work-assignment-pod:assigned-pod,
+  plays placement-plan-pod:planned-pod,
+  plays violation-pod:violated-pod;
+
+entity milestone @abstract,
+  owns milestone-id @key,
+  owns proposed-by,
+  owns due-time,
+  owns milestone-status;
+
+entity room-milestone sub milestone,
+  owns target-pod-count,
+  owns completion-event-code,
+  owns completion-event-name,
+  owns priority,
+  plays project-room-milestone:owned-room-milestone,
+  plays room-milestone-constraint:constraining-room-milestone,
+  plays floor-room-milestone-aggregation:member-room-milestone,
+  plays violation-room-milestone:violated-room-milestone;
+
+entity floor-milestone sub milestone,
+  owns required-room-count,
+  owns completed-room-count,
+  plays project-floor-milestone:owned-floor-milestone,
+  plays floor-milestone-constraint:constraining-floor-milestone,
+  plays floor-room-milestone-aggregation:owner-floor-milestone,
+  plays violation-floor-milestone:violated-floor-milestone;
+
+entity shipment,
+  owns shipment-id @key,
+  owns shipment-no,
+  owns shipment-status,
+  owns planned-ship-time,
+  owns planned-arrival-time,
+  owns actual-arrival-time,
+  plays project-shipment:owned-shipment,
+  plays shipment-pod:shipping-shipment;
+
+entity arrival-event,
+  owns arrival-event-id @key,
+  owns arrival-status,
+  owns actual-arrival-time,
+  owns receiving-location,
+  owns confirmed-by,
+  plays pod-arrival-event:owned-arrival-event;
+
+entity arrival-plan,
+  owns arrival-plan-id @key,
+  owns recommended-arrival-time,
+  owns latest-safe-arrival-time,
+  owns earliest-useful-arrival-time,
+  owns backlog-risk-level,
+  owns plan-status,
+  plays arrival-plan-pod:planning-arrival-plan,
+  plays recommendation-arrival-plan:referenced-arrival-plan;
+
+entity activity-template,
+  owns template-id @key,
+  owns l1-code,
+  owns l1-name,
+  owns l2-code,
+  owns l2-name,
+  owns activity-category,
+  owns completion-flag,
+  owns product-type,
+  owns cooling-mode,
+  owns project-scene,
+  plays activity-template-instance:source-template,
+  plays template-dependency-link:predecessor-template,
+  plays template-dependency-link:successor-template,
+  plays activity-template-sla:constrained-template;
+
+entity activity-dependency-template,
+  owns dependency-template-id @key,
+  owns dependency-type,
+  plays template-dependency-link:dependency-record;
+
+entity sla-standard,
+  owns sla-id @key,
+  owns standard-duration,
+  owns duration-unit,
+  owns crew-capacity-assumption,
+  owns scenario-tag,
+  plays activity-template-sla:applied-sla;
+
+entity activity-instance,
+  owns activity-id @key,
+  owns activity-status,
+  owns planned-start-time,
+  owns planned-finish-time,
+  owns latest-start-time,
+  owns latest-finish-time,
+  owns actual-start-time,
+  owns actual-finish-time,
+  owns is-milestone-anchor,
+  owns sequence-no,
+  plays pod-activity:owned-activity,
+  plays activity-template-instance:generated-instance,
+  plays activity-instance-dependency:predecessor-activity,
+  plays activity-instance-dependency:successor-activity,
+  plays pod-schedule-activity:scheduled-activity;
+
+entity pod-schedule,
+  owns pod-schedule-id @key,
+  owns schedule-type,
+  owns generated-at,
+  owns is-feasible,
+  plays pod-schedule-pod:owning-schedule,
+  plays pod-schedule-activity:owning-schedule;
+
+entity crew,
+  owns crew-id @key,
+  owns crew-status,
+  owns daily-pod-capacity,
+  owns parallel-limit,
+  plays project-crew:owned-crew,
+  plays crew-work-assignment:executing-crew;
+
+entity work-assignment,
+  owns assignment-id @key,
+  owns assignment-date,
+  owns start-time,
+  owns finish-time,
+  owns assignment-status,
+  plays crew-work-assignment:executed-assignment,
+  plays work-assignment-pod:assignment-record,
+  plays work-assignment-room:assignment-record,
+  plays work-assignment-position:assignment-record;
+
+entity placement-plan,
+  owns placement-plan-id @key,
+  owns placement-score,
+  owns plan-status,
+  plays placement-plan-pod:planning-placement,
+  plays placement-plan-building:planning-placement,
+  plays placement-plan-floor:planning-placement,
+  plays placement-plan-room:planning-placement,
+  plays placement-plan-position:planning-placement,
+  plays recommendation-placement-plan:referenced-placement-plan;
+
+entity constraint-violation,
+  owns violation-id @key,
+  owns violation-type,
+  owns severity,
+  owns message,
+  plays violation-pod:violation-record,
+  plays violation-room-milestone:violation-record,
+  plays violation-floor-milestone:violation-record,
+  plays recommendation-violation:referenced-violation;
+
+entity decision-recommendation,
+  owns recommendation-id @key,
+  owns recommendation-type,
+  owns recommendation-text,
+  owns confidence,
+  owns created-at,
+  plays recommendation-arrival-plan:recommendation-record,
+  plays recommendation-placement-plan:recommendation-record,
+  plays recommendation-violation:recommendation-record;
