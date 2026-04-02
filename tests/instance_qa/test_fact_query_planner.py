@@ -32,27 +32,25 @@ def _question(event_type: str = 'power_outage') -> QuestionDSL:
     )
 
 
-def test_build_fact_queries_creates_anchor_and_neighbor_queries_for_room_power_outage():
+def test_build_fact_queries_keeps_neighbor_adjacency_as_parallel_queries():
     queries = build_fact_queries(_question('power_outage'), _schema_registry())
-
-    purposes = [item.purpose for item in queries]
-    assert 'resolve_anchor' in purposes
-    assert 'collect_neighbors' in purposes
 
     anchor_query = next(item for item in queries if item.purpose == 'resolve_anchor')
     assert anchor_query.root.entity == 'Room'
     assert anchor_query.root.identifier.attribute == 'room_id'
     assert anchor_query.root.identifier.value == '01'
 
-    neighbor_query = next(item for item in queries if item.purpose == 'collect_neighbors')
-    assert neighbor_query.traversals
-    assert all(step.from_entity == 'Room' for step in neighbor_query.traversals)
+    neighbor_queries = [item for item in queries if item.purpose == 'collect_neighbors']
+    assert len(neighbor_queries) == 2
+    assert all(len(item.traversals) == 1 for item in neighbor_queries)
+
+    relation_set = {item.traversals[0].relation for item in neighbor_queries}
+    assert relation_set == {'OCCURS_IN', 'ASSIGNED_TO'}
 
 
 def test_build_fact_queries_uses_generic_fallback_when_event_profile_missing():
     queries = build_fact_queries(_question('unknown_event_type'), _schema_registry())
 
-    assert queries
-    neighbor_query = next(item for item in queries if item.purpose == 'collect_neighbors')
-    assert neighbor_query.traversals
-    assert neighbor_query.traversals[0].relation == 'OCCURS_IN'
+    neighbor_queries = [item for item in queries if item.purpose == 'collect_neighbors']
+    assert neighbor_queries
+    assert neighbor_queries[0].traversals[0].relation == 'OCCURS_IN'

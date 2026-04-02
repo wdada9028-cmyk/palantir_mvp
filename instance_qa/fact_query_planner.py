@@ -59,47 +59,46 @@ def build_fact_queries(question: QuestionDSL, schema_registry: SchemaRegistry) -
 
     limit = max(int(question.constraints.limit), 1)
 
-    anchor_query = FactQueryDSL(
-        purpose='resolve_anchor',
-        root=FactQueryRoot(entity=anchor_entity, identifier=question.anchor.identifier),
-        projection={anchor_entity: list(anchor_schema.attributes)},
-        limit=limit,
-    )
-
-    queries = [anchor_query]
+    queries: list[FactQueryDSL] = [
+        FactQueryDSL(
+            purpose='resolve_anchor',
+            root=FactQueryRoot(entity=anchor_entity, identifier=question.anchor.identifier),
+            projection={anchor_entity: list(anchor_schema.attributes)},
+            limit=limit,
+        )
+    ]
 
     adjacency = list(schema_registry.adjacency.get(anchor_entity, []))
     if not adjacency:
         return queries
 
     ordered_adjacency = _order_adjacency(adjacency, profile)
-    traversals = [
-        FactQueryTraversal(
-            from_entity=item.entity,
-            relation=item.relation,
-            direction=item.direction,
-            to_entity=item.neighbor_entity,
-            required=False,
-        )
-        for item in ordered_adjacency
-    ]
-
-    projection: dict[str, list[str]] = {anchor_entity: list(anchor_schema.key_attributes or anchor_schema.attributes)}
     for item in ordered_adjacency:
-        entity = schema_registry.entities.get(item.neighbor_entity)
-        if entity is None:
+        neighbor_schema = schema_registry.entities.get(item.neighbor_entity)
+        if neighbor_schema is None:
             continue
-        projection[item.neighbor_entity] = list(entity.key_attributes or entity.attributes)
 
-    queries.append(
-        FactQueryDSL(
-            purpose='collect_neighbors',
-            root=FactQueryRoot(entity=anchor_entity, identifier=question.anchor.identifier),
-            traversals=traversals,
-            projection=projection,
-            limit=limit,
+        queries.append(
+            FactQueryDSL(
+                purpose='collect_neighbors',
+                root=FactQueryRoot(entity=anchor_entity, identifier=question.anchor.identifier),
+                traversals=[
+                    FactQueryTraversal(
+                        from_entity=item.entity,
+                        relation=item.relation,
+                        direction=item.direction,
+                        to_entity=item.neighbor_entity,
+                        required=False,
+                    )
+                ],
+                projection={
+                    anchor_entity: list(anchor_schema.key_attributes or anchor_schema.attributes),
+                    item.neighbor_entity: list(neighbor_schema.key_attributes or neighbor_schema.attributes),
+                },
+                limit=limit,
+            )
         )
-    )
+
     return queries
 
 
