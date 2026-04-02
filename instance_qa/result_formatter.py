@@ -13,4 +13,10 @@ def build_generator_context(
         'schema_summary': schema_summary,
         'fact_pack': fact_pack,
         'reasoning': reasoning_result,
+        'result_summary': {
+            'instance_counts': dict(fact_pack.get('counts') or {}),
+            'risk_level': ((reasoning_result.get('summary') or {}).get('risk_level')),
+            'confidence': ((reasoning_result.get('summary') or {}).get('confidence')),
+            'at_risk': ((reasoning_result.get('deadline_assessment') or {}).get('at_risk')),
+        },
     }

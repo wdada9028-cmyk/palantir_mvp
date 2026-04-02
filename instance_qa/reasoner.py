@@ -93,6 +93,11 @@ def _iter_instances(fact_pack: dict[str, object]):
 
 
 def _collect_affected_entities(fact_pack: dict[str, object]) -> list[dict[str, object]]:
+    anchor = _anchor_from_metadata(fact_pack)
+    links = _links(fact_pack)
+    if anchor and links:
+        return _collect_via_links(anchor, links)[:20]
+
     items: list[dict[str, object]] = []
     for entity_name, rows in _iter_instances(fact_pack):
         for row in rows:
@@ -106,8 +111,68 @@ def _collect_affected_entities(fact_pack: dict[str, object]) -> list[dict[str, o
     return items[:20]
 
 
+def _anchor_from_metadata(fact_pack: dict[str, object]) -> tuple[str, str] | None:
+    metadata = fact_pack.get('metadata')
+    if not isinstance(metadata, dict):
+        return None
+    anchor = metadata.get('anchor')
+    if not isinstance(anchor, dict):
+        return None
+    entity = str(anchor.get('entity') or '').strip()
+    anchor_id = str(anchor.get('id') or '').strip()
+    if not entity or not anchor_id:
+        return None
+    return entity, anchor_id
+
+
+def _links(fact_pack: dict[str, object]) -> list[dict[str, str]]:
+    raw = fact_pack.get('links')
+    if not isinstance(raw, list):
+        return []
+    result: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        try:
+            result.append(
+                {
+                    'source_entity': str(item['source_entity']),
+                    'source_id': str(item['source_id']),
+                    'relation': str(item['relation']),
+                    'target_entity': str(item['target_entity']),
+                    'target_id': str(item['target_id']),
+                }
+            )
+        except Exception:
+            continue
+    return result
+
+
+def _collect_via_links(anchor: tuple[str, str], links: list[dict[str, str]]) -> list[dict[str, object]]:
+    frontier = {anchor}
+    visited = {anchor}
+    affected: list[dict[str, object]] = []
+    for _ in range(2):
+        next_frontier: set[tuple[str, str]] = set()
+        for link in links:
+            source = (link['source_entity'], link['source_id'])
+            target = (link['target_entity'], link['target_id'])
+            if source in frontier and target not in visited:
+                visited.add(target)
+                next_frontier.add(target)
+                affected.append({'entity': target[0], 'id': target[1], 'reason': f"{source[0]}({source[1]}) --{link['relation']}--> {target[0]}({target[1]})"})
+            if target in frontier and source not in visited:
+                visited.add(source)
+                next_frontier.add(source)
+                affected.append({'entity': source[0], 'id': source[1], 'reason': f"{source[0]}({source[1]}) --{link['relation']}--> {target[0]}({target[1]})"})
+        frontier = next_frontier
+        if not frontier:
+            break
+    return affected
+
+
 def _instance_identifier(entity_name: str, row: dict[str, object]) -> str:
-    for key in ('id', f'{entity_name.lower()}_id', 'pod_code', 'assignment_id'):
+    for key in ('id', f'{entity_name.lower()}_id', 'pod_code', 'assignment_id', 'activity_id'):
         value = row.get(key)
         if value is not None and str(value).strip():
             return str(value)
