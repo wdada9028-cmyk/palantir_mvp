@@ -24,8 +24,11 @@ def validate_question_dsl(question: QuestionDSL, schema_registry: SchemaRegistry
     if entity is None:
         return f'Unknown anchor entity: {anchor.entity}'
 
-    if anchor.identifier is not None and anchor.identifier.attribute not in entity.attributes:
-        return f'Unknown anchor identifier attribute {anchor.identifier.attribute!r} for entity {anchor.entity}'
+    if anchor.identifier is not None:
+        if anchor.identifier.attribute not in entity.attributes:
+            return f'Unknown anchor identifier attribute {anchor.identifier.attribute!r} for entity {anchor.entity}'
+        if anchor.identifier.attribute not in entity.key_attributes:
+            return f'Anchor identifier attribute {anchor.identifier.attribute!r} must be a key attribute for entity {anchor.entity}'
 
     scenario = question.scenario
     if scenario is not None and scenario.event_type not in _ALLOWED_EVENT_TYPES:

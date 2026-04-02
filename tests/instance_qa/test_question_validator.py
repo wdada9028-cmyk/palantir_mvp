@@ -38,3 +38,18 @@ def test_validate_question_dsl_accepts_known_entity_and_identifier_attribute():
     )
 
     assert validate_question_dsl(question, _schema_registry()) is None
+
+
+
+def test_validate_question_dsl_rejects_non_key_identifier_attribute():
+    question = QuestionDSL(
+        mode="impact_analysis",
+        anchor=AnchorRef(entity="Room", identifier=IdentifierRef(attribute="room_status", value="active"), surface="01??"),
+        scenario=ScenarioRef(event_type="power_outage", duration=DurationRef(value=7, unit="day"), start_time=None, severity=None, raw_event="??"),
+        goal=GoalRef(type="list_impacts", target_entity=None, target_metric=None, deadline=None),
+        constraints=ConstraintRef(statuses=[], time_window=None, limit=20),
+    )
+
+    error = validate_question_dsl(question, _schema_registry())
+
+    assert "key attribute" in error
