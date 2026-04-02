@@ -1,0 +1,43 @@
+﻿events:
+  generic_incident:
+    relation_priority:
+      - OCCURS_IN
+      - ASSIGNS
+      - ASSIGNED_TO
+      - APPLIES_TO
+      - HAS
+  power_outage:
+    relation_priority:
+      - OCCURS_IN
+      - ASSIGNS
+      - APPLIES_TO
+      - HAS
+      - ASSIGNED_TO
+  fire:
+    relation_priority:
+      - OCCURS_IN
+      - ASSIGNS
+      - APPLIES_TO
+      - HAS
+      - ASSIGNED_TO
+  delay:
+    relation_priority:
+      - DEPENDS_ON
+      - CONSTRAINS
+      - APPLIES_TO
+      - ASSIGNS
+      - OCCURS_IN
+  capacity_loss:
+    relation_priority:
+      - EXECUTES
+      - ASSIGNS
+      - OCCURS_IN
+      - APPLIES_TO
+      - HAS
+  access_blocked:
+    relation_priority:
+      - OCCURS_IN
+      - ASSIGNS
+      - APPLIES_TO
+      - HAS
+      - ASSIGNED_TO
