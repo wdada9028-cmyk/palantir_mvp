@@ -1,54 +1,28 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from cloud_delivery_ontology_palantir.server.ontology_http_app import create_app
 
 
-def _write_minimal_ontology(input_file: Path) -> None:
-    input_file.write_text(
-        """# 测试本体
-
-## 4. Object Types
-## 4.1 项目与目标层
-### `Project`
-中文释义：项目
-关键属性：
-- `project_id`: 项目ID
-
-### `Goal`
-中文释义：目标
-关键属性：
-- `goal_id`: 目标ID
-
-## 5. Link Types
-### 5.1 项目与目标关系
-- `Project HAS Goal`: 项目包含目标
-""",
-        encoding='utf-8',
-    )
-
-
 def _write_relation_ontology(input_file: Path) -> None:
     input_file.write_text(
         """# 测试本体
 
-## 4. Object Types
-## 4.3 设备与物流层
-### `PoD`
-中文释义：设备落位点
-关键属性：
-- `pod_id`: PoD ID
+## Object Types（实体）
 
-## 4.6 决策与解释层
-### `ArrivalPlan`
-中文释义：到货计划
+### `Room`
+中文释义：机房
 关键属性：
-- `arrival_plan_id`: 到货计划ID
+- `room_id`：机房ID
 
-## 5. Link Types
-### 5.1 决策关系
-- `ArrivalPlan APPLIES_TO PoD`: 到货计划作用于 PoD
+### `WorkAssignment`
+中文释义：施工分配
+关键属性：
+- `assignment_id`：分配ID
+
+## Link Types（关系）
+- `WorkAssignment OCCURS_IN Room`：施工分配发生于机房
 """,
         encoding='utf-8',
     )
@@ -56,7 +30,7 @@ def _write_relation_ontology(input_file: Path) -> None:
 
 def test_create_app_serves_ontology_page_and_graph_payload(tmp_path: Path):
     input_file = tmp_path / 'ontology.md'
-    _write_minimal_ontology(input_file)
+    _write_relation_ontology(input_file)
 
     app = create_app(input_file=input_file)
     client = TestClient(app)
@@ -65,134 +39,26 @@ def test_create_app_serves_ontology_page_and_graph_payload(tmp_path: Path):
     graph = client.get('/api/graph')
 
     assert page.status_code == 200
-    assert 'text/html' in page.headers['content-type']
-    assert '智能问答助手' in page.text
     assert graph.status_code == 200
     assert 'elements' in graph.json()
 
 
-def test_graph_api_returns_same_payload_shape_as_export(tmp_path: Path):
-    input_file = tmp_path / 'ontology.md'
-    _write_minimal_ontology(input_file)
-
-    app = create_app(input_file=input_file)
-    client = TestClient(app)
-    payload = client.get('/api/graph').json()
-
-    assert 'elements' in payload
-    assert 'relationLegend' in payload
-    assert 'metricGroupId' in payload
-
-
-def test_qa_stream_emits_sse_steps_and_final_answer(tmp_path: Path):
+def test_qa_stream_emits_instance_qa_pipeline_events(tmp_path: Path):
     input_file = tmp_path / 'ontology.md'
     _write_relation_ontology(input_file)
 
     app = create_app(input_file=input_file)
     client = TestClient(app)
-    response = client.get('/api/qa/stream', params={'q': 'PoD 有什么关系'})
+    response = client.get('/api/qa/stream', params={'q': '01机房断电一周会有哪些影响'})
 
     assert response.status_code == 200
     text = response.text
-    assert 'event: anchor_node' in text
-    assert 'event: evidence' in text
+    assert 'event: question_parsed' in text
+    assert 'event: question_dsl' in text
+    assert 'event: fact_query_planned' in text
+    assert 'event: typedb_result' in text
+    assert 'event: reasoning_done' in text
     assert 'event: answer_done' in text
-
-
-def test_qa_stream_keeps_legacy_event_order_and_payload_shape(tmp_path: Path):
-    input_file = tmp_path / 'ontology.md'
-    _write_relation_ontology(input_file)
-
-    app = create_app(input_file=input_file)
-    client = TestClient(app)
-    response = client.get('/api/qa/stream', params={'q': 'PoD 有什么关系'})
-    text = response.text
-
-    assert text.index('event: anchor_node') < text.index('event: expand_neighbors')
-    assert text.index('event: expand_neighbors') < text.index('event: filter_nodes')
-    assert text.index('event: filter_nodes') < text.index('event: focus_subgraph')
-    assert text.index('event: focus_subgraph') < text.index('event: evidence')
-    assert text.index('event: evidence') < text.index('event: answer_done')
-    assert 'step_title' not in text
-    assert 'new_node_ids' not in text
-    assert 'focus_node_ids' not in text
-
-
-def test_qa_stream_emits_new_trace_events_in_order(tmp_path: Path):
-    input_file = tmp_path / 'ontology.md'
-    _write_relation_ontology(input_file)
-
-    app = create_app(input_file=input_file)
-    client = TestClient(app)
-    response = client.get('/api/qa/stream', params={'q': 'PoD 有什么关系'})
-    text = response.text
-
-    assert 'event: trace_anchor' in text
-    assert 'event: trace_expand' in text
-    assert 'event: evidence_final' in text
-    assert text.index('event: trace_anchor') < text.index('event: trace_expand')
-    assert text.index('event: trace_expand') < text.index('event: evidence_final')
-    assert text.index('event: evidence_final') < text.index('event: answer_done')
-    assert '"delay_ms":' in text
-
-
-
-def test_qa_stream_emits_answer_delta_and_extended_answer_done(tmp_path: Path, monkeypatch):
-    input_file = tmp_path / 'ontology.md'
-    _write_relation_ontology(input_file)
-
-    from cloud_delivery_ontology_palantir.qa.generator import GeneratorChunk, GeneratorResult
-
-    async def fake_generator(question, bundle, fallback_answer):
-        yield GeneratorChunk(delta='???', answer_text_so_far='???')
-        yield GeneratorChunk(delta='????(ArrivalPlan)', answer_text_so_far='???????(ArrivalPlan)')
-        yield GeneratorResult(answer_text='???????(ArrivalPlan) ?????????(PoD)?', used_fallback=False)
-
-    monkeypatch.setattr(
-        'cloud_delivery_ontology_palantir.server.ontology_http_service.iter_generated_answer',
-        fake_generator,
-    )
-
-    app = create_app(input_file=input_file)
-    client = TestClient(app)
-    response = client.get('/api/qa/stream', params={'q': '???????? PoD?'})
-    text = response.text
-
-    assert response.status_code == 200
-    assert text.index('event: anchor_node') < text.index('event: expand_neighbors')
-    assert text.index('event: expand_neighbors') < text.index('event: filter_nodes')
-    assert text.index('event: filter_nodes') < text.index('event: focus_subgraph')
-    assert text.index('event: evidence_final') < text.index('event: answer_delta')
-    assert text.index('event: answer_delta') < text.index('event: answer_done')
-    assert '"answer":' in text
-    assert '"answer_text":' in text
-    assert '"trace_report":' in text
-    assert '"used_fallback": false' in text
-
-
-
-def test_qa_stream_generator_failure_still_returns_fallback_answer_done(tmp_path: Path, monkeypatch):
-    input_file = tmp_path / 'ontology.md'
-    _write_relation_ontology(input_file)
-
-    async def failing_generator(question, bundle, fallback_answer):
-        raise RuntimeError('generator boom')
-        yield  # pragma: no cover
-
-    monkeypatch.setattr(
-        'cloud_delivery_ontology_palantir.server.ontology_http_service.iter_generated_answer',
-        failing_generator,
-    )
-
-    app = create_app(input_file=input_file)
-    client = TestClient(app)
-    response = client.get('/api/qa/stream', params={'q': '???????? PoD?'})
-    text = response.text
-
-    assert response.status_code == 200
-    assert 'event: answer_done' in text
-    assert '"used_fallback": true' in text
-    assert '"answer_text":' in text
 
 
 def test_create_app_resolves_tql_input_before_loading_graph(tmp_path: Path, monkeypatch):

@@ -162,3 +162,80 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(value)
         result.append(value)
     return result
+
+
+
+async def iter_generated_instance_answer(
+    question: str,
+    *,
+    schema_summary: dict[str, object],
+    fact_pack: dict[str, object],
+    reasoning_result: dict[str, object],
+    fallback_answer: TemplateAnswer,
+) -> AsyncIterator[GeneratorChunk | GeneratorResult]:
+    config = _load_config()
+    if config is None:
+        yield GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+        return
+
+    fact_summary = _build_instance_fact_summary(fact_pack, reasoning_result)
+    if not fact_summary:
+        yield GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+        return
+
+    answer_parts: list[str] = []
+    try:
+        client = get_openai_client()
+        stream = await client.chat.completions.create(
+            model=config.model,
+            temperature=0.1,
+            stream=True,
+            messages=[
+                {
+                    'role': 'system',
+                    'content': '???????????????? schema ????????????????????',
+                },
+                {
+                    'role': 'user',
+                    'content': f'?????{question}\n\nSchema ???{schema_summary}\n\n????????\n{fact_summary}\n\n????????',
+                },
+            ],
+        )
+        async for chunk in stream:
+            delta = _extract_delta_text(chunk)
+            if not delta:
+                continue
+            answer_parts.append(delta)
+            yield GeneratorChunk(delta=delta, answer_text_so_far=''.join(answer_parts))
+    except Exception:
+        yield GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+        return
+
+    answer_text = ''.join(answer_parts).strip()
+    if not answer_text:
+        yield GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+        return
+    yield GeneratorResult(answer_text=answer_text, used_fallback=False)
+
+
+def _build_instance_fact_summary(fact_pack: dict[str, object], reasoning_result: dict[str, object]) -> str:
+    instances = fact_pack.get('instances') if isinstance(fact_pack, dict) else {}
+    counts = fact_pack.get('counts') if isinstance(fact_pack, dict) else {}
+    lines: list[str] = []
+    if isinstance(counts, dict) and counts:
+        for entity, count in counts.items():
+            lines.append(f'- {entity}: {count} ?')
+    if isinstance(instances, dict):
+        for entity, items in instances.items():
+            if not isinstance(items, list) or not items:
+                continue
+            lines.append(f'- {entity} ??: {items[0]}')
+
+    summary = reasoning_result.get('summary') if isinstance(reasoning_result, dict) else None
+    deadline = reasoning_result.get('deadline_assessment') if isinstance(reasoning_result, dict) else None
+    if summary:
+        lines.append(f'- ????: {summary}')
+    if deadline:
+        lines.append(f'- ????: {deadline}')
+
+    return '\n'.join(lines)

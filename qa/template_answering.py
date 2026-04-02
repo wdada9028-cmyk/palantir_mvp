@@ -187,3 +187,30 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(value)
         result.append(value)
     return result
+
+
+
+def build_instance_template_answer(question: str, fact_pack: dict[str, object], reasoning_result: dict[str, object]) -> TemplateAnswer:
+    instances = fact_pack.get('instances') if isinstance(fact_pack, dict) else {}
+    instance_count = 0
+    if isinstance(instances, dict):
+        instance_count = sum(len(items) for items in instances.values() if isinstance(items, list))
+
+    summary = reasoning_result.get('summary', {}) if isinstance(reasoning_result, dict) else {}
+    deadline_assessment = reasoning_result.get('deadline_assessment', {}) if isinstance(reasoning_result, dict) else {}
+
+    if summary.get('answer_type') == 'deadline_risk':
+        at_risk = bool(deadline_assessment.get('at_risk'))
+        deadline = deadline_assessment.get('deadline')
+        supporting = deadline_assessment.get('supporting_facts') or []
+        if at_risk:
+            detail = f'??????{supporting[0]}' if supporting else ''
+            return TemplateAnswer(answer=f'?????????{question}?????????? {deadline}?{detail}?', insufficient_evidence=False)
+        return TemplateAnswer(answer=f'?????????{question}?????????????? {deadline}??', insufficient_evidence=False)
+
+    if instance_count <= 0:
+        return TemplateAnswer(answer=f'???????????????{question}???????', insufficient_evidence=True)
+
+    affected = reasoning_result.get('affected_entities') if isinstance(reasoning_result, dict) else []
+    affected_count = len(affected) if isinstance(affected, list) else 0
+    return TemplateAnswer(answer=f'???????????? {affected_count or instance_count} ????????????', insufficient_evidence=False)

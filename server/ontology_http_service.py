@@ -1,161 +1,138 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
-from ..qa.generator import GeneratorChunk, GeneratorResult, iter_generated_answer
-from ..qa.template_answering import TemplateAnswer, _build_search_trace_report, _dedupe_trace_steps
-from ..search.ontology_query_models import OntologyEvidenceBundle, RetrievalStep, TraceExpansionStep
-
-DEFAULT_TRACE_DELAY_MS = 650
+from ..instance_qa.orchestrator import InstanceQAResult
+from ..qa.generator import GeneratorChunk, GeneratorResult, iter_generated_instance_answer
 
 
 def sse_event(name: str, payload: dict[str, object]) -> str:
     return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-async def iter_qa_events(
-    bundle: OntologyEvidenceBundle,
-    fallback_answer: TemplateAnswer,
-    trace_delay_ms: int = DEFAULT_TRACE_DELAY_MS,
-) -> AsyncIterator[str]:
+async def iter_qa_events(result: InstanceQAResult) -> AsyncIterator[str]:
     session_id = uuid4().hex
-    step_counter = 0
+    step = 0
 
-    if bundle.search_trace.seed_node_ids:
-        step_counter += 1
-        yield sse_event(
-            'trace_anchor',
-            {
-                'session_id': session_id,
-                'step': step_counter,
-                'message': '已定位问题相关的核心实体',
-                'node_ids': list(bundle.search_trace.seed_node_ids),
-                'edge_ids': [],
-                'evidence_ids': [item.evidence_id for item in bundle.evidence_chain if item.kind == 'seed'],
-                'delay_ms': trace_delay_ms,
-            },
-        )
+    step += 1
+    yield sse_event('question_parsed', {
+        'session_id': session_id,
+        'step': step,
+        'question': result.question,
+        'normalized_query': result.normalized_query,
+    })
 
-    for trace_step in bundle.search_trace.expansion_steps:
-        step_counter += 1
-        yield sse_event('trace_expand', _trace_expand_payload(session_id, step_counter, trace_step, trace_delay_ms))
+    step += 1
+    yield sse_event('question_dsl', {
+        'session_id': session_id,
+        'step': step,
+        'question_dsl': _question_to_dict(result.question_dsl),
+        'validation_error': result.question_validation_error,
+    })
 
-    for step in bundle.highlight_steps:
-        step_counter += 1
-        yield sse_event(step.action, _step_payload(session_id, step_counter, step))
+    step += 1
+    yield sse_event('fact_query_planned', {
+        'session_id': session_id,
+        'step': step,
+        'fact_queries': result.fact_queries,
+    })
 
-    for item in bundle.evidence_chain:
-        step_counter += 1
-        yield sse_event(
-            'evidence',
-            {
-                'session_id': session_id,
-                'step': step_counter,
-                'message': item.message,
-                'node_ids': item.node_ids,
-                'edge_ids': item.edge_ids,
-                'evidence_ids': [item.evidence_id],
-                'evidence': item.to_dict(),
-            },
-        )
-
-    step_counter += 1
-    yield sse_event(
-        'evidence_final',
-        {
+    for item in result.fact_queries:
+        step += 1
+        yield sse_event('typedb_query', {
             'session_id': session_id,
-            'step': step_counter,
-            'message': '已确认最终证据链',
-            'node_ids': bundle.matched_node_ids,
-            'edge_ids': bundle.matched_edge_ids,
-            'evidence_ids': [item.evidence_id for item in bundle.evidence_chain],
-            'evidence_chain': [item.to_dict() for item in bundle.evidence_chain],
-            'search_trace': bundle.search_trace.to_dict(),
-        },
-    )
+            'step': step,
+            'purpose': item.get('purpose'),
+            'typeql': item.get('typeql', ''),
+            'error': item.get('error'),
+        })
+
+    step += 1
+    yield sse_event('typedb_result', {
+        'session_id': session_id,
+        'step': step,
+        'fact_pack': result.fact_pack,
+    })
+
+    step += 1
+    yield sse_event('reasoning_done', {
+        'session_id': session_id,
+        'step': step,
+        'reasoning': result.reasoning,
+    })
 
     final_result: GeneratorResult | None = None
-    try:
-        async for item in iter_generated_answer(bundle.question, bundle, fallback_answer):
-            if isinstance(item, GeneratorChunk):
-                step_counter += 1
-                yield sse_event(
-                    'answer_delta',
-                    {
-                        'session_id': session_id,
-                        'step': step_counter,
-                        'delta': item.delta,
-                        'answer_text_so_far': item.answer_text_so_far,
-                    },
-                )
-                continue
-            final_result = item
-    except Exception:
-        final_result = GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+    async for chunk in iter_generated_instance_answer(
+        result.question,
+        schema_summary={'entities': list(result.fact_pack.get('instances', {}).keys())},
+        fact_pack=result.fact_pack,
+        reasoning_result=result.reasoning,
+        fallback_answer=result.fallback_answer,
+    ):
+        if isinstance(chunk, GeneratorChunk):
+            step += 1
+            yield sse_event('answer_delta', {
+                'session_id': session_id,
+                'step': step,
+                'delta': chunk.delta,
+                'answer_text_so_far': chunk.answer_text_so_far,
+            })
+        else:
+            final_result = chunk
 
     if final_result is None:
-        final_result = GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+        final_result = GeneratorResult(answer_text=result.fallback_answer.answer, used_fallback=True)
 
-    trace_report = _build_search_trace_report(bundle, _dedupe_trace_steps(bundle.search_trace.expansion_steps))
+    step += 1
+    yield sse_event('answer_done', {
+        'session_id': session_id,
+        'step': step,
+        'answer': result.fallback_answer.answer,
+        'answer_text': final_result.answer_text,
+        'used_fallback': final_result.used_fallback,
+        'reasoning': result.reasoning,
+        'fact_pack': result.fact_pack,
+    })
 
-    step_counter += 1
-    yield sse_event(
-        'answer_done',
-        {
-            'session_id': session_id,
-            'step': step_counter,
-            'message': '已生成回答',
-            'node_ids': bundle.matched_node_ids,
-            'edge_ids': bundle.matched_edge_ids,
-            'evidence_ids': [item.evidence_id for item in bundle.evidence_chain],
-            'answer': fallback_answer.answer,
-            'answer_text': final_result.answer_text,
-            'trace_report': trace_report,
-            'used_fallback': final_result.used_fallback,
-            'evidence_chain': [item.to_dict() for item in bundle.evidence_chain],
-            'matched_node_ids': bundle.matched_node_ids,
-            'matched_edge_ids': bundle.matched_edge_ids,
-            'insufficient_evidence': fallback_answer.insufficient_evidence,
-            'search_trace': bundle.search_trace.to_dict(),
+
+def _question_to_dict(question) -> dict[str, object]:
+    return {
+        'mode': question.mode,
+        'anchor': {
+            'entity': question.anchor.entity,
+            'identifier': (
+                {'attribute': question.anchor.identifier.attribute, 'value': question.anchor.identifier.value}
+                if question.anchor.identifier
+                else None
+            ),
+            'surface': question.anchor.surface,
         },
-    )
-
-
-
-def _step_payload(session_id: str, step_number: int, step: RetrievalStep) -> dict[str, object]:
-    return {
-        'session_id': session_id,
-        'step': step_number,
-        'message': step.message,
-        'node_ids': step.node_ids,
-        'edge_ids': step.edge_ids,
-        'evidence_ids': step.evidence_ids,
-    }
-
-
-
-def _trace_expand_payload(
-    session_id: str,
-    step_number: int,
-    trace_step: TraceExpansionStep,
-    trace_delay_ms: int,
-) -> dict[str, object]:
-    return {
-        'session_id': session_id,
-        'step': step_number,
-        'message': f'正在沿 {trace_step.relation} 关系扩展检索路径',
-        'node_ids': list(trace_step.snapshot_node_ids),
-        'edge_ids': list(trace_step.snapshot_edge_ids),
-        'evidence_ids': [],
-        'delay_ms': trace_delay_ms,
-        'trace_step': trace_step.to_dict(),
-        'from_node_id': trace_step.from_node_id,
-        'edge_id': trace_step.edge_id,
-        'to_node_id': trace_step.to_node_id,
-        'relation': trace_step.relation,
-        'reason': trace_step.reason,
-        'snapshot_node_ids': list(trace_step.snapshot_node_ids),
-        'snapshot_edge_ids': list(trace_step.snapshot_edge_ids),
+        'scenario': (
+            {
+                'event_type': question.scenario.event_type,
+                'duration': (
+                    {'value': question.scenario.duration.value, 'unit': question.scenario.duration.unit}
+                    if question.scenario and question.scenario.duration
+                    else None
+                ),
+                'start_time': question.scenario.start_time if question.scenario else None,
+                'severity': question.scenario.severity if question.scenario else None,
+                'raw_event': question.scenario.raw_event if question.scenario else '',
+            }
+            if question.scenario
+            else None
+        ),
+        'goal': {
+            'type': question.goal.type,
+            'target_entity': question.goal.target_entity,
+            'target_metric': question.goal.target_metric,
+            'deadline': question.goal.deadline,
+        },
+        'constraints': {
+            'statuses': list(question.constraints.statuses),
+            'time_window': question.constraints.time_window,
+            'limit': question.constraints.limit,
+        },
     }

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -6,11 +6,10 @@ from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from ..export.graph_export import build_graph_payload, build_interactive_graph_html
+from ..instance_qa.orchestrator import run_instance_qa
 from ..ontology.definition_graph_builder import build_definition_graph
 from ..ontology.definition_markdown_parser import parse_definition_markdown
 from ..pipelines.input_file_resolver import resolve_input_to_markdown
-from ..qa.template_answering import build_template_answer
-from ..search.ontology_query_engine import retrieve_ontology_evidence
 from .ontology_http_service import iter_qa_events
 
 
@@ -40,8 +39,7 @@ def create_app(*, input_file: Path) -> FastAPI:
 
     @app.get('/api/qa/stream')
     def qa_stream(q: str = Query(..., min_length=1)) -> StreamingResponse:
-        bundle = retrieve_ontology_evidence(app.state.graph, q)
-        fallback_answer = build_template_answer(bundle)
-        return StreamingResponse(iter_qa_events(bundle, fallback_answer), media_type='text/event-stream')
+        result = run_instance_qa(q, app.state.graph)
+        return StreamingResponse(iter_qa_events(result), media_type='text/event-stream')
 
     return app
