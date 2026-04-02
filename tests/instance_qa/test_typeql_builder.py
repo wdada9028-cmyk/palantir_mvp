@@ -16,7 +16,7 @@ def test_build_typeql_query_generates_match_for_anchor_lookup():
     typeql = build_typeql_query(query)
 
     assert 'match' in typeql
-    assert 'room_id "01"' in typeql
+    assert 'room-id "01"' in typeql
     assert 'get' in typeql
     assert 'limit 20' in typeql
 
@@ -54,4 +54,26 @@ def test_build_typeql_query_rejects_unsupported_filter_ops():
     )
 
     with pytest.raises(ValueError, match='Unsupported filter op'):
+        build_typeql_query(query)
+
+
+def test_build_typeql_query_rejects_non_root_filters():
+    query = FactQueryDSL(
+        purpose='collect_neighbors',
+        root=FactQueryRoot(entity='Room', identifier=IdentifierRef(attribute='room_id', value='01')),
+        traversals=[
+            FactQueryTraversal(
+                from_entity='Room',
+                relation='OCCURS_IN',
+                direction='in',
+                to_entity='WorkAssignment',
+                required=False,
+            )
+        ],
+        filters=[FactQueryFilter(entity='WorkAssignment', attribute='assignment_id', op='eq', value='WA-001')],
+        projection={'Room': ['room_id'], 'WorkAssignment': ['assignment_id']},
+        limit=10,
+    )
+
+    with pytest.raises(ValueError, match='Non-root filters are not supported'):
         build_typeql_query(query)

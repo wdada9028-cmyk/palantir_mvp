@@ -15,6 +15,8 @@ def build_typeql_query(query: FactQueryDSL) -> str:
     for item in query.filters:
         if item.op not in _ALLOWED_FILTER_OPS:
             raise ValueError(f'Unsupported filter op for TypeQL builder: {item.op}')
+        if item.entity != query.root.entity:
+            raise ValueError('Non-root filters are not supported by the current TypeQL builder.')
 
     lines: list[str] = ['match']
     root_type = _type_label(query.root.entity)
@@ -35,8 +37,7 @@ def build_typeql_query(query: FactQueryDSL) -> str:
         lines.append(f'{to_var} isa {_type_label(item.to_entity)};')
 
     for item in query.filters:
-        entity_var = '$root' if item.entity == query.root.entity else '$root'
-        lines.append(f'{entity_var} has {_attr_label(item.attribute)} {_render_literal(item.value)};')
+        lines.append(f'$root has {_attr_label(item.attribute)} {_render_literal(item.value)};')
 
     projection_vars = ['$root', *[f'$n{index}' for index, _ in enumerate(query.traversals, start=1)]]
     if query.aggregate == 'count':
@@ -57,7 +58,7 @@ def _type_label(value: str) -> str:
 
 
 def _attr_label(value: str) -> str:
-    return value.lower()
+    return value.strip().replace('_', '-').lower()
 
 
 def _render_literal(value: object) -> str:
@@ -66,4 +67,3 @@ def _render_literal(value: object) -> str:
     text = str(value)
     escaped = text.replace('"', '\\"')
     return f'"{escaped}"'
-
