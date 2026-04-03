@@ -2,15 +2,31 @@
 
 ## Current State
 - Agent: Codex
-- Branch: codex/main2
-- Last session: 2026-03-24 21:01
-- Active work: familiarized current project structure and verified baseline health
+- Branch: codex/typedb-instance-qa-design
+- Last session: 2026-04-03 09:17
+- Active work: replaced schema-only QA with TypeDB-backed instance QA path and wired UI stage playback
 - Blockers: None
 - Next steps:
-  - Follow the user's next implementation or debugging request
-  - Use `typedb_schema_v4.tql` or `typedb_schema_v4.converted.md` for local build/serve smoke flows if needed
+  - Review the current diff and split/commit Task 8 and Task 9 changes if desired
+  - Smoke the `/api/qa/stream` path against a real read-only TypeDB environment via env vars
 
 ## Session History
+
+### 2026-04-03 09:17 - Codex
+**What was done:**
+- Finished Task 8 integration fixes for the instance QA stream path, including orchestrator, generator fallback text, and stream tests
+- Added front-end handlers for `question_parsed` / `question_dsl` / `fact_query_planned` / `typedb_query` / `typedb_result` / `reasoning_done`
+- Added graph export regression coverage for instance QA stage handlers
+- Repaired `qa/template_answering.py` trace wording regression found by full-suite verification
+- Ran `pytest tests/instance_qa -q`, `pytest tests/server/test_ontology_http_app.py tests/integration/test_instance_qa_stream.py tests/integration/test_definition_graph_export.py -q`, and `pytest tests -q`
+
+**Decisions made:**
+- Keep the existing `/api/qa/stream` entrypoint and replace its backend with the TypeDB-backed instance QA orchestrator
+- Surface instance QA stages in the existing UI via status/evidence/trace updates instead of creating a separate panel
+- Preserve controlled backend-generated TypeQL and keep LLM limited to summarization
+
+**Open questions:**
+- Whether to split the current working tree changes into separate Task 8 / Task 9 commits now or squash them later
 
 ### 2026-03-24 21:01 - Codex
 **What was done:**
@@ -461,20 +477,6 @@
 
 **Decisions made:**
 - Marked Task 1 as PASS because the test-only state remains within allowed files, preserves all four required RED coverage points, and does not touch production code
-
-**Open questions:**
-- None
-
-### 2026-03-17 18:08 - Codex
-**What was done:**
-- Rolled back progressive playback changes in `search/ontology_query_models.py`, `search/ontology_query_engine.py`, `server/ontology_http_service.py`, and `export/graph_export.py`
-- Restored legacy SSE payload shape and event order: `anchor_node -> expand_neighbors -> filter_nodes -> focus_subgraph -> evidence -> answer_done`
-- Removed playback controls, `PlaybackController`, snapshot replay logic, progressive metadata fields, pacing logic, and progressive playback tests
-- Re-ran the required focused verification commands and `pytest tests -q`
-
-**Decisions made:**
-- Kept the original ontology graph, QA assistant, SSE retrieval flow, and evidence clickback behavior
-- Standardized new rollback edits with unicode-safe literals to avoid shell encoding corruption
 
 **Open questions:**
 - None

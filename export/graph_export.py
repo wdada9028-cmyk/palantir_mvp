@@ -207,6 +207,7 @@ window.cytoscape = window.cytoscape || cytoscape;
     let persistedEvidenceChain = [];
     let persistedEvidenceMap = new Map();
     let evidenceSnapshots = new Map();
+    let instanceQaStageSections = new Map();
     let playbackController = null;
     let activeDetailNode = null;
     let detailCardFrame = null;
@@ -475,6 +476,7 @@ window.cytoscape = window.cytoscape || cytoscape;
       persistedEvidenceChain = [];
       persistedEvidenceMap = new Map();
       evidenceSnapshots = new Map();
+      instanceQaStageSections = new Map();
       clearTraceClasses();
       setFilteringState(false);
       clearPlaybackTimers(playbackController);
@@ -482,6 +484,7 @@ window.cytoscape = window.cytoscape || cytoscape;
         playbackController.queue = [];
         playbackController.running = false;
         playbackController.traceProtocolSeen = false;
+        playbackController.instanceQaProtocolSeen = false;
         playbackController.currentSnapshot = null;
       }
     }
@@ -595,11 +598,18 @@ window.cytoscape = window.cytoscape || cytoscape;
       });
     }
 
-    function appendEvidenceIncrementally(evidence) {
+    function upsertEvidenceItem(evidence, snapshot) {
       if (!evidence || !evidence.evidence_id) return;
       persistedEvidenceMap.set(evidence.evidence_id, evidence);
+      if (snapshot) {
+        evidenceSnapshots.set(evidence.evidence_id, normalizeSnapshot(snapshot));
+      }
       persistedEvidenceChain = Array.from(persistedEvidenceMap.values());
       renderEvidenceTimeline(persistedEvidenceChain);
+    }
+
+    function appendEvidenceIncrementally(evidence) {
+      upsertEvidenceItem(evidence, evidence && evidence.snapshot ? evidence.snapshot : null);
     }
 
     function persistFinalEvidence(result) {
@@ -607,6 +617,229 @@ window.cytoscape = window.cytoscape || cytoscape;
       persistedEvidenceMap = new Map(persistedEvidenceChain.map(item => [item.evidence_id, item]));
       evidenceSnapshots = buildEvidenceSnapshots(persistedEvidenceChain, result.search_trace || {});
       renderEvidenceTimeline(persistedEvidenceChain);
+    }
+
+    function renderInstanceQaTraceReport() {
+      if (!instanceQaStageSections.size) {
+        setQaTraceReport('');
+        return;
+      }
+      const sections = Array.from(instanceQaStageSections.values()).map(section => {
+        const lines = Array.isArray(section.lines) ? section.lines.filter(Boolean) : [];
+        if (!lines.length) {
+          return section.title || '';
+        }
+        return `${section.title}
+${lines.map(line => `- ${line}`).join('
+')}`;
+      }).filter(Boolean);
+      setQaTraceReport(sections.join('
+
+'));
+    }
+
+    function updateInstanceQaStageSection(stageKey, title, lines) {
+      const normalizedLines = Array.isArray(lines)
+        ? lines.map(line => String(line || '').trim()).filter(Boolean)
+        : [];
+      instanceQaStageSections.set(stageKey, { title: String(title || '').trim(), lines: normalizedLines });
+      renderInstanceQaTraceReport();
+    }
+
+    function findNodeIdsForEntityNames(entityNames) {
+      const wanted = new Set((entityNames || []).map(value => String(value || '').trim()).filter(Boolean));
+      if (!wanted.size) return [];
+      return cy.nodes().filter(node => wanted.has(String(node.data('display_name') || '').trim())).map(node => node.id());
+    }
+
+    function findEdgeIdsForRelationTriples(triples) {
+      const matchers = (triples || []).filter(Boolean);
+      if (!matchers.length) return [];
+      const edgeIds = [];
+      cy.edges().forEach(edge => {
+        const sourceNode = edge.source();
+        const targetNode = edge.target();
+        const relation = String(edge.data('relation') || '').trim();
+        const sourceName = String(sourceNode.data('display_name') || '').trim();
+        const targetName = String(targetNode.data('display_name') || '').trim();
+        const matched = matchers.some(item => {
+          const relationMatches = !item.relation || String(item.relation).trim() === relation;
+          const sourceMatches = !item.source || String(item.source).trim() === sourceName;
+          const targetMatches = !item.target || String(item.target).trim() === targetName;
+          return relationMatches && sourceMatches && targetMatches;
+        });
+        if (matched) {
+          edgeIds.push(edge.id());
+        }
+      });
+      return [...new Set(edgeIds)];
+    }
+
+    function buildTypedbResultSnapshot(factPack) {
+      const counts = factPack && typeof factPack === 'object' && factPack.counts && typeof factPack.counts === 'object'
+        ? Object.keys(factPack.counts)
+        : [];
+      const instances = factPack && typeof factPack === 'object' && factPack.instances && typeof factPack.instances === 'object'
+        ? Object.keys(factPack.instances)
+        : [];
+      const links = Array.isArray(factPack && factPack.links) ? factPack.links : [];
+      return {
+        node_ids: findNodeIdsForEntityNames([...counts, ...instances]),
+        edge_ids: findEdgeIdsForRelationTriples(links.map(link => ({
+          source: link.source_entity,
+          relation: link.relation,
+          target: link.target_entity,
+        }))),
+      };
+    }
+
+    function buildReasoningSnapshot(reasoning) {
+      const affected = Array.isArray(reasoning && reasoning.affected_entities) ? reasoning.affected_entities : [];
+      return {
+        node_ids: findNodeIdsForEntityNames(affected.map(item => item && item.entity)),
+        edge_ids: [],
+      };
+    }
+
+    function handleInstanceQaStageEvent(eventType, payload) {
+      const safePayload = payload && typeof payload === 'object' ? payload : {};
+      if (eventType === 'question_parsed') {
+        const message = safePayload.normalized_query
+          ? `已解析问题：${safePayload.normalized_query}`
+          : '已完成问题解析';
+        setQaStatus(message);
+        updateInstanceQaStageSection('question_parsed', '问题解析', [
+          safePayload.question ? `原问题：${safePayload.question}` : '',
+          safePayload.normalized_query ? `归一化：${safePayload.normalized_query}` : '',
+        ]);
+        upsertEvidenceItem({
+          evidence_id: 'stage:question_parsed',
+          label: '问题解析',
+          kind: 'stage',
+          message,
+          why_matched: [],
+        }, { node_ids: [], edge_ids: [] });
+        return;
+      }
+
+      if (eventType === 'question_dsl') {
+        const questionDsl = safePayload.question_dsl && typeof safePayload.question_dsl === 'object' ? safePayload.question_dsl : {};
+        const anchor = questionDsl.anchor && typeof questionDsl.anchor === 'object' ? questionDsl.anchor : {};
+        const scenario = questionDsl.scenario && typeof questionDsl.scenario === 'object' ? questionDsl.scenario : {};
+        const goal = questionDsl.goal && typeof questionDsl.goal === 'object' ? questionDsl.goal : {};
+        const message = `已识别锚点 ${anchor.entity || '-'} / 事件 ${scenario.event_type || '-'} / 模式 ${questionDsl.mode || '-'}`;
+        setQaStatus(message);
+        updateInstanceQaStageSection('question_dsl', '结构化理解', [
+          questionDsl.mode ? `mode: ${questionDsl.mode}` : '',
+          anchor.entity ? `anchor: ${anchor.entity}${anchor.identifier && anchor.identifier.value ? `(${anchor.identifier.value})` : ''}` : '',
+          scenario.event_type ? `event: ${scenario.event_type}` : '',
+          goal.deadline ? `deadline: ${goal.deadline}` : '',
+          safePayload.validation_error ? `validation_error: ${safePayload.validation_error}` : '',
+        ]);
+        upsertEvidenceItem({
+          evidence_id: 'stage:question_dsl',
+          label: '结构化理解',
+          kind: 'stage',
+          message,
+          why_matched: safePayload.validation_error ? [safePayload.validation_error] : [],
+        }, {
+          node_ids: findNodeIdsForEntityNames(anchor.entity ? [anchor.entity] : []),
+          edge_ids: [],
+        });
+        return;
+      }
+
+      if (eventType === 'fact_query_planned') {
+        const factQueries = Array.isArray(safePayload.fact_queries) ? safePayload.fact_queries : [];
+        const message = `已生成 ${factQueries.length} 条查询计划`;
+        setQaStatus(message);
+        updateInstanceQaStageSection('fact_query_planned', '查询计划', [
+          ...factQueries.slice(0, 5).map(item => {
+            const purpose = item && item.purpose ? item.purpose : 'query';
+            const rowCount = item && item.row_count !== undefined && item.row_count !== null ? ` rows=${item.row_count}` : '';
+            const error = item && item.error ? ` error=${item.error}` : '';
+            return `${purpose}${rowCount}${error}`;
+          }),
+          factQueries.length > 5 ? `... +${factQueries.length - 5} more` : '',
+        ]);
+        upsertEvidenceItem({
+          evidence_id: 'stage:fact_query_planned',
+          label: '查询计划',
+          kind: 'stage',
+          message,
+          why_matched: factQueries.slice(0, 5).map(item => item && item.purpose ? String(item.purpose) : 'query'),
+        }, { node_ids: [], edge_ids: [] });
+        return;
+      }
+
+      if (eventType === 'typedb_query') {
+        const purpose = safePayload.purpose || 'query';
+        const message = `正在执行 TypeDB 查询：${purpose}`;
+        setQaStatus(message);
+        updateInstanceQaStageSection(`typedb_query:${purpose}`, '执行 TypeDB 查询', [
+          `purpose: ${purpose}`,
+          safePayload.error ? `error: ${safePayload.error}` : '',
+          safePayload.typeql ? `typeql: ${safePayload.typeql}` : '',
+        ]);
+        upsertEvidenceItem({
+          evidence_id: `stage:typedb_query:${purpose}`,
+          label: '执行 TypeDB 查询',
+          kind: 'stage',
+          message,
+          why_matched: [safePayload.typeql ? String(safePayload.typeql) : ''],
+        }, { node_ids: [], edge_ids: [] });
+        return;
+      }
+
+      if (eventType === 'typedb_result') {
+        const factPack = safePayload.fact_pack && typeof safePayload.fact_pack === 'object' ? safePayload.fact_pack : {};
+        const counts = factPack.counts && typeof factPack.counts === 'object' ? factPack.counts : {};
+        const countLines = Object.entries(counts).map(([entity, count]) => `${entity}: ${count}`);
+        const total = Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
+        const message = total > 0
+          ? `已获取 ${total} 条实例结果`
+          : '未检索到实例结果';
+        setQaStatus(message);
+        updateInstanceQaStageSection('typedb_result', '实例结果', [
+          ...countLines,
+          factPack.metadata && factPack.metadata.question_validation_error
+            ? `validation_error: ${factPack.metadata.question_validation_error}`
+            : '',
+        ]);
+        upsertEvidenceItem({
+          evidence_id: 'stage:typedb_result',
+          label: '实例结果',
+          kind: 'stage',
+          message,
+          why_matched: countLines,
+        }, buildTypedbResultSnapshot(factPack));
+        return;
+      }
+
+      if (eventType === 'reasoning_done') {
+        const reasoning = safePayload.reasoning && typeof safePayload.reasoning === 'object' ? safePayload.reasoning : {};
+        const summary = reasoning.summary && typeof reasoning.summary === 'object' ? reasoning.summary : {};
+        const deadlineAssessment = reasoning.deadline_assessment && typeof reasoning.deadline_assessment === 'object'
+          ? reasoning.deadline_assessment
+          : {};
+        const message = `已完成推理：${summary.answer_type || 'result'}`;
+        setQaStatus(message);
+        updateInstanceQaStageSection('reasoning_done', '推理结论', [
+          summary.answer_type ? `answer_type: ${summary.answer_type}` : '',
+          summary.risk_level ? `risk_level: ${summary.risk_level}` : '',
+          summary.confidence ? `confidence: ${summary.confidence}` : '',
+          deadlineAssessment.deadline ? `deadline: ${deadlineAssessment.deadline}` : '',
+          deadlineAssessment.at_risk !== undefined ? `at_risk: ${Boolean(deadlineAssessment.at_risk)}` : '',
+        ]);
+        upsertEvidenceItem({
+          evidence_id: 'stage:reasoning_done',
+          label: '推理结论',
+          kind: 'stage',
+          message,
+          why_matched: Array.isArray(deadlineAssessment.supporting_facts) ? deadlineAssessment.supporting_facts : [],
+        }, buildReasoningSnapshot(reasoning));
+        return;
+      }
     }
 
     function playRetrievalEvent(eventType, payload) {
@@ -632,12 +865,16 @@ window.cytoscape = window.cytoscape || cytoscape;
         this.running = false;
         this.timers = [];
         this.traceProtocolSeen = false;
+        this.instanceQaProtocolSeen = false;
         this.currentSnapshot = null;
       }
 
       enqueue(eventType, payload) {
         if (['trace_anchor', 'trace_expand', 'evidence_final'].includes(eventType)) {
           this.traceProtocolSeen = true;
+        }
+        if (['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done'].includes(eventType)) {
+          this.instanceQaProtocolSeen = true;
         }
         this.queue.push({ eventType, payload });
         if (!this.running) {
@@ -664,6 +901,10 @@ window.cytoscape = window.cytoscape || cytoscape;
         if (payload && payload.message) {
           setQaStatus(payload.message);
         }
+        if (['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done'].includes(eventType)) {
+          handleInstanceQaStageEvent(eventType, payload || {});
+          return;
+        }
         if (eventType === 'trace_anchor') {
           replayFromSnapshot({ node_ids: payload.node_ids || [], edge_ids: payload.edge_ids || [] }, { fit: true, duration: 340 });
           return;
@@ -684,11 +925,13 @@ window.cytoscape = window.cytoscape || cytoscape;
           return;
         }
         if (eventType === 'answer_done') {
-          if (!this.traceProtocolSeen) {
+          if (!this.traceProtocolSeen && !this.instanceQaProtocolSeen) {
             persistFinalEvidence(payload || {});
           }
           setQaAnswer(payload.answer_text || payload.answer || '');
-          setQaTraceReport(payload.trace_report || '');
+          if (payload.trace_report) {
+            setQaTraceReport(payload.trace_report || '');
+          }
         }
       }
     }
@@ -708,7 +951,7 @@ window.cytoscape = window.cytoscape || cytoscape;
       setQaStatus('\\u6b63\\u5728\\u68c0\\u7d22\\u672c\\u4f53\\u8bc1\\u636e...');
       const eventSource = new EventSource(`/api/qa/stream?q=${encodeURIComponent(trimmedQuestion)}`);
       qaEventSource = eventSource;
-      ['trace_anchor', 'trace_expand', 'evidence_final', 'answer_delta', 'answer_done'].forEach(eventType => {
+      ['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done', 'trace_anchor', 'trace_expand', 'evidence_final', 'answer_delta', 'answer_done'].forEach(eventType => {
         eventSource.addEventListener(eventType, event => {
           const payload = JSON.parse(event.data);
           playbackController.enqueue(eventType, payload);

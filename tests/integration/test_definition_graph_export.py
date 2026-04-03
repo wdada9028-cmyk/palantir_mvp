@@ -303,3 +303,19 @@ def test_exported_html_hides_group_chip_for_ungrouped_object_type(tmp_path: Path
     assert 'attrs.display_group ||' not in text
     assert '"label": "Project"' in text
     assert '"label": "Project\\n' not in text
+
+
+
+def test_exported_html_contains_instance_qa_stage_handlers(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'question_parsed' in text
+    assert 'question_dsl' in text
+    assert 'fact_query_planned' in text
+    assert 'typedb_query' in text
+    assert 'typedb_result' in text
+    assert 'reasoning_done' in text
+    assert 'handleInstanceQaStageEvent' in text
+    assert 'renderInstanceQaTraceReport' in text
