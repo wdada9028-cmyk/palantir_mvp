@@ -23,8 +23,12 @@ class _TraversalShape:
 
 @dataclass(frozen=True, slots=True)
 class _QueryShape:
+    entity_by_var: dict[str, str]
     projection_vars: list[str]
     traversals: list[_TraversalShape]
+    base_lines: list[str]
+    limit_line: str | None
+    aggregate: str | None
 
 
 class TypeDBConfigError(RuntimeError):
@@ -40,7 +44,35 @@ class TypeDBQueryError(RuntimeError):
 
 
 _GET_LINE_RE = re.compile(r'^get\s+(.+);$', re.IGNORECASE)
-_RELATION_LINE_RE = re.compile(r'^\((\$[A-Za-z0-9_]+),\s*(\$[A-Za-z0-9_]+)\)\s+isa\s+([a-z0-9\-]+);$', re.IGNORECASE)
+_LIMIT_LINE_RE = re.compile(r'^limit\s+\d+;$', re.IGNORECASE)
+_ISA_LINE_RE = re.compile(r'^(\$[A-Za-z0-9_]+)\s+isa\s+([a-z0-9\-]+);$', re.IGNORECASE)
+_RELATION_LINE_RE = re.compile(r'^\(\s*(?:[a-z0-9\-]+\s*:\s*)?(\$[A-Za-z0-9_]+),\s*(?:[a-z0-9\-]+\s*:\s*)?(\$[A-Za-z0-9_]+)\s*\)\s+isa\s+([a-z0-9\-]+);$', re.IGNORECASE)
+_COUNT_LINE_RE = re.compile(r'^count;$', re.IGNORECASE)
+
+_ENTITY_TOKEN_OVERRIDES = {'pod': 'PoD', 'sla': 'SLA'}
+_IDENTIFIER_CANDIDATES = (
+    'id',
+    'project_id',
+    'building_id',
+    'floor_id',
+    'room_id',
+    'position_id',
+    'pod_id',
+    'pod_code',
+    'shipment_id',
+    'arrival_event_id',
+    'arrival_plan_id',
+    'template_id',
+    'dependency_template_id',
+    'sla_id',
+    'activity_id',
+    'crew_id',
+    'assignment_id',
+    'placement_plan_id',
+    'violation_id',
+    'recommendation_id',
+    'milestone_id',
+)
 
 
 def load_typedb_config() -> TypeDBConfig | None:
@@ -90,12 +122,14 @@ class TypeDBClient:
 
     def connect(self) -> None:
         try:
-            from typedb.driver import TypeDB
+            from typedb.driver import Credentials, DriverOptions, TypeDB
         except Exception as exc:  # pragma: no cover - import failures are environmental
             raise TypeDBConnectionError(f'Unable to import typedb-driver: {exc}') from exc
 
         try:
-            self._driver = TypeDB.core_driver(self._config.address)
+            credentials = Credentials(self._config.username, self._config.password)
+            driver_options = DriverOptions(is_tls_enabled=False)
+            self._driver = TypeDB.driver(self._config.address, credentials, driver_options)
         except Exception as exc:  # pragma: no cover - integration path
             raise TypeDBConnectionError(f'Failed to connect TypeDB driver: {exc}') from exc
 
@@ -116,42 +150,122 @@ class TypeDBClient:
             raise TypeDBQueryError('TypeQL query must not be empty.')
 
         try:
-            from typedb.driver import SessionType, TransactionType
+            from typedb.driver import TransactionType
         except Exception as exc:  # pragma: no cover - import failures are environmental
-            raise TypeDBConnectionError(f'Unable to import typedb-driver session types: {exc}') from exc
+            raise TypeDBConnectionError(f'Unable to import typedb-driver transaction types: {exc}') from exc
 
+        shape = _parse_query_shape(query)
+        if shape.aggregate == 'count':
+            raise TypeDBQueryError('Count queries are not implemented for the current TypeDB 3.x client.')
+
+        fetch_query = _build_fetch_query(shape)
         try:
-            with self._driver.session(self._config.database, SessionType.DATA) as session:
-                with session.transaction(TransactionType.READ) as tx:
-                    results = list(tx.query.get(query))
-                    return _map_query_results(query, results, tx)
-        except TypeDBConnectionError:
+            with self._driver.transaction(self._config.database, TransactionType.READ) as tx:
+                answer = tx.query(fetch_query).resolve()
+                if not answer.is_concept_documents():
+                    raise TypeDBQueryError('Expected concept documents from fetch query.')
+                return _map_concept_documents(shape, list(answer.as_concept_documents()))
+        except TypeDBQueryError:
             raise
         except Exception as exc:
             raise TypeDBQueryError(f'Failed to execute TypeQL query: {exc}') from exc
 
 
-def _map_query_results(query: str, results: list[Any], tx: Any) -> list[dict[str, object]]:
-    shape = _parse_query_shape(query)
-    rows: list[dict[str, object]] = []
+def _parse_query_shape(query: str) -> _QueryShape:
+    entity_by_var: dict[str, str] = {}
+    projection_vars: list[str] = []
+    traversals: list[_TraversalShape] = []
+    base_lines: list[str] = []
+    limit_line: str | None = None
+    aggregate: str | None = None
 
+    for raw_line in query.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        get_match = _GET_LINE_RE.match(line)
+        if get_match:
+            projection_vars = [item.strip().lstrip('$') for item in get_match.group(1).split(',') if item.strip()]
+            continue
+        if _COUNT_LINE_RE.match(line):
+            aggregate = 'count'
+            continue
+        if _LIMIT_LINE_RE.match(line):
+            limit_line = line
+            continue
+
+        isa_match = _ISA_LINE_RE.match(line)
+        if isa_match:
+            variable, entity = isa_match.groups()
+            entity_by_var[variable.lstrip('$')] = _normalize_entity_label(entity)
+            base_lines.append(line)
+            continue
+
+        relation_match = _RELATION_LINE_RE.match(line)
+        if relation_match:
+            source_var, target_var, relation = relation_match.groups()
+            traversals.append(
+                _TraversalShape(
+                    source_var=source_var.lstrip('$'),
+                    target_var=target_var.lstrip('$'),
+                    relation=relation,
+                )
+            )
+            base_lines.append(line)
+            continue
+
+        base_lines.append(line)
+
+    return _QueryShape(
+        entity_by_var=entity_by_var,
+        projection_vars=projection_vars,
+        traversals=traversals,
+        base_lines=base_lines,
+        limit_line=limit_line,
+        aggregate=aggregate,
+    )
+
+
+def _build_fetch_query(shape: _QueryShape) -> str:
+    lines = list(shape.base_lines)
+    if shape.limit_line:
+        lines.append(shape.limit_line)
+
+    fetch_lines = ['fetch {']
+    for index, variable in enumerate(shape.projection_vars):
+        suffix = ',' if index < len(shape.projection_vars) - 1 else ''
+        fetch_lines.extend(
+            [
+                f'    "{variable}": {{',
+                f'        "iid": iid(${variable}),',
+                f'        "data": {{ ${variable}.* }}',
+                f'    }}{suffix}',
+            ]
+        )
+    fetch_lines.append('};')
+    return '\n'.join(lines + fetch_lines)
+
+
+def _map_concept_documents(shape: _QueryShape, documents: list[dict[str, Any]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
     if not shape.traversals:
-        for result in results:
-            root = _concept_from_result(result, 'root')
-            row = _thing_row(root, tx)
+        for document in documents:
+            root_doc = document.get('root') if isinstance(document, dict) else None
+            row = _document_to_row(shape.entity_by_var.get('root', 'Root'), root_doc)
             if row is not None:
                 rows.append(row)
         return rows
 
-    for result in results:
+    for document in documents:
+        if not isinstance(document, dict):
+            continue
         for traversal in shape.traversals:
-            source = _concept_from_result(result, traversal.source_var)
-            target = _concept_from_result(result, traversal.target_var)
-            source_row = _thing_row(source, tx)
-            target_row = _thing_row(target, tx)
+            source_entity = shape.entity_by_var.get(traversal.source_var, traversal.source_var)
+            target_entity = shape.entity_by_var.get(traversal.target_var, traversal.target_var)
+            source_row = _document_to_row(source_entity, document.get(traversal.source_var))
+            target_row = _document_to_row(target_entity, document.get(traversal.target_var))
             if source_row is None or target_row is None:
                 continue
-
             non_root_var = traversal.target_var if traversal.source_var == 'root' else traversal.source_var
             neighbor_row = dict(target_row if non_root_var == traversal.target_var else source_row)
             neighbor_row.update(
@@ -167,62 +281,29 @@ def _map_query_results(query: str, results: list[Any], tx: Any) -> list[dict[str
     return rows
 
 
-def _parse_query_shape(query: str) -> _QueryShape:
-    projection_vars: list[str] = []
-    traversals: list[_TraversalShape] = []
-
-    for raw_line in query.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        get_match = _GET_LINE_RE.match(line)
-        if get_match:
-            projection_vars = [item.strip().lstrip('$') for item in get_match.group(1).split(',') if item.strip()]
-            continue
-        relation_match = _RELATION_LINE_RE.match(line)
-        if relation_match:
-            source_var, target_var, relation = relation_match.groups()
-            traversals.append(
-                _TraversalShape(
-                    source_var=source_var.lstrip('$'),
-                    target_var=target_var.lstrip('$'),
-                    relation=relation,
-                )
-            )
-
-    return _QueryShape(projection_vars=projection_vars, traversals=traversals)
-
-
-def _concept_from_result(result: Any, variable: str) -> Any | None:
-    getter = getattr(result, 'get', None)
-    if getter is None:
+def _document_to_row(entity_name: str, document: Any) -> dict[str, object] | None:
+    if not isinstance(document, dict):
         return None
-    return getter(variable)
-
-
-def _thing_row(thing: Any, tx: Any) -> dict[str, object] | None:
-    if thing is None:
-        return None
-    if not getattr(thing, 'is_entity', lambda: False)():
-        return None
-
-    entity = thing.as_entity()
+    data = document.get('data')
+    if not isinstance(data, dict):
+        data = {}
     row: dict[str, object] = {
-        '_entity': _normalize_entity_label(_label_name(entity.get_type())),
-        '_iid': _safe_call(entity, 'get_iid') or '',
+        '_entity': entity_name,
+        '_iid': str(document.get('iid') or '').strip(),
     }
-
-    for attribute in _safe_iter(entity, 'get_has', tx):
-        label = _snake_case(_label_name(attribute.get_type()))
-        if not label:
-            continue
-        row[label] = _attribute_value(attribute)
-
+    for key, value in data.items():
+        attr = _snake_case(str(key))
+        row[attr] = _normalize_value(value)
     return row
 
 
-def _attribute_value(attribute: Any) -> object:
-    value = _safe_call(attribute, 'get_value')
+def _normalize_value(value: Any) -> object:
+    if isinstance(value, dict):
+        if 'value' in value and len(value) == 1:
+            return value['value']
+        return {str(key): _normalize_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_value(item) for item in value]
     if hasattr(value, 'isoformat'):
         try:
             return value.isoformat()
@@ -231,52 +312,10 @@ def _attribute_value(attribute: Any) -> object:
     return value
 
 
-def _safe_iter(obj: Any, method_name: str, *args: Any) -> list[Any]:
-    method = getattr(obj, method_name, None)
-    if method is None:
-        return []
-    try:
-        values = method(*args)
-    except TypeError:
-        values = method()
-    return list(values or [])
-
-
-def _safe_call(obj: Any, method_name: str) -> Any:
-    method = getattr(obj, method_name, None)
-    if method is None:
-        return None
-    try:
-        return method()
-    except Exception:
-        return None
-
-
-def _label_name(obj: Any) -> str:
-    if obj is None:
-        return ''
-    label = getattr(obj, 'get_label', None)
-    if callable(label):
-        obj = label()
-    name = getattr(obj, 'name', None)
-    if name is not None:
-        return str(name)
-    scoped_name = getattr(obj, 'scoped_name', None)
-    if callable(scoped_name):
-        try:
-            return str(scoped_name())
-        except Exception:
-            return ''
-    return str(obj)
-
-
 def _snake_case(value: str) -> str:
     text = str(value or '').strip().replace('-', '_')
     text = re.sub(r'([a-z0-9])([A-Z])', r'_', text)
     return text.lower()
-
-
-_ENTITY_TOKEN_OVERRIDES = {'pod': 'PoD', 'sla': 'SLA'}
 
 
 def _normalize_entity_label(value: str) -> str:
@@ -286,31 +325,6 @@ def _normalize_entity_label(value: str) -> str:
 
 def _normalize_relation_label(value: str) -> str:
     return _snake_case(value).upper()
-
-
-_IDENTIFIER_CANDIDATES = (
-    'id',
-    'project_id',
-    'building_id',
-    'floor_id',
-    'room_id',
-    'position_id',
-    'pod_id',
-    'pod_code',
-    'shipment_id',
-    'arrival_event_id',
-    'arrival_plan_id',
-    'template_id',
-    'dependency_template_id',
-    'sla_id',
-    'activity_id',
-    'crew_id',
-    'assignment_id',
-    'placement_plan_id',
-    'violation_id',
-    'recommendation_id',
-    'milestone_id',
-)
 
 
 def _best_identifier(row: dict[str, object]) -> str:

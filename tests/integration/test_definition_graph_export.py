@@ -319,3 +319,27 @@ def test_exported_html_contains_instance_qa_stage_handlers(tmp_path: Path):
     assert 'reasoning_done' in text
     assert 'handleInstanceQaStageEvent' in text
     assert 'renderInstanceQaTraceReport' in text
+
+
+
+def test_exported_html_embeds_javascript_without_syntax_error(tmp_path: Path):
+    import re
+    import subprocess
+    import sys
+
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    html = output.read_text(encoding='utf-8')
+    scripts = re.findall(r'<script>(.*?)</script>', html, flags=re.S)
+    script = scripts[-1]
+    script_path = tmp_path / 'page-script.js'
+    script_path.write_text(script, encoding='utf-8')
+
+    result = subprocess.run(
+        ['node', '--check', str(script_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr

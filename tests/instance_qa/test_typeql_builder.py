@@ -29,6 +29,9 @@ def test_build_typeql_query_supports_single_hop_neighbor_traversal():
             FactQueryTraversal(
                 from_entity='Room',
                 relation='OCCURS_IN',
+                typedb_relation='work-assignment-room',
+                entity_role='assigned-room',
+                neighbor_role='assignment-record',
                 direction='in',
                 to_entity='WorkAssignment',
                 required=False,
@@ -40,8 +43,9 @@ def test_build_typeql_query_supports_single_hop_neighbor_traversal():
 
     typeql = build_typeql_query(query)
 
-    assert 'occurs-in' in typeql
-    assert '$n1' in typeql
+    assert 'work-assignment-room' in typeql
+    assert 'assignment-record: $n1' in typeql
+    assert 'assigned-room: $root' in typeql
 
 
 def test_build_typeql_query_rejects_unsupported_filter_ops():
@@ -65,6 +69,9 @@ def test_build_typeql_query_rejects_non_root_filters():
             FactQueryTraversal(
                 from_entity='Room',
                 relation='OCCURS_IN',
+                typedb_relation='work-assignment-room',
+                entity_role='assigned-room',
+                neighbor_role='assignment-record',
                 direction='in',
                 to_entity='WorkAssignment',
                 required=False,

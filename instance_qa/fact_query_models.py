@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 
@@ -25,6 +25,9 @@ class FactQueryTraversal:
     relation: str
     direction: str
     to_entity: str
+    typedb_relation: str | None = None
+    entity_role: str | None = None
+    neighbor_role: str | None = None
     required: bool = True
 
 

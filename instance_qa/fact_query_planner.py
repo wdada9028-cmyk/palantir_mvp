@@ -88,6 +88,9 @@ def build_fact_queries(question: QuestionDSL, schema_registry: SchemaRegistry) -
                         relation=item.relation,
                         direction=item.direction,
                         to_entity=item.neighbor_entity,
+                        typedb_relation=item.typedb_relation,
+                        entity_role=item.entity_role,
+                        neighbor_role=item.neighbor_role,
                         required=False,
                     )
                 ],

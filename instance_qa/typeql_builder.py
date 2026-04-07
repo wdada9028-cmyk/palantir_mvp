@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import re
 
@@ -27,13 +27,19 @@ def build_typeql_query(query: FactQueryDSL) -> str:
         lines.append(f'$root has {_attr_label(identifier.attribute)} {_render_literal(identifier.value)};')
 
     for index, item in enumerate(query.traversals, start=1):
-        relation_type = _type_label(item.relation)
+        relation_type = _type_label(item.typedb_relation or item.relation)
         from_var = '$root' if index == 1 and item.from_entity == query.root.entity else f'$from{index}'
         to_var = f'$n{index}'
-        if item.direction == 'out':
-            lines.append(f'({from_var}, {to_var}) isa {relation_type};')
+        if item.entity_role and item.neighbor_role:
+            if item.direction == 'out':
+                lines.append(f'({item.entity_role}: {from_var}, {item.neighbor_role}: {to_var}) isa {relation_type};')
+            else:
+                lines.append(f'({item.neighbor_role}: {to_var}, {item.entity_role}: {from_var}) isa {relation_type};')
         else:
-            lines.append(f'({to_var}, {from_var}) isa {relation_type};')
+            if item.direction == 'out':
+                lines.append(f'({from_var}, {to_var}) isa {relation_type};')
+            else:
+                lines.append(f'({to_var}, {from_var}) isa {relation_type};')
         lines.append(f'{to_var} isa {_type_label(item.to_entity)};')
 
     for item in query.filters:

@@ -13,8 +13,8 @@ def _schema_registry() -> SchemaRegistry:
         relations=[],
         adjacency={
             'Room': [
-                SchemaAdjacency(entity='Room', relation='OCCURS_IN', direction='in', neighbor_entity='WorkAssignment'),
-                SchemaAdjacency(entity='Room', relation='ASSIGNED_TO', direction='in', neighbor_entity='PoD'),
+                SchemaAdjacency(entity='Room', relation='OCCURS_IN', direction='in', neighbor_entity='WorkAssignment', typedb_relation='work-assignment-room', entity_role='assigned-room', neighbor_role='assignment-record'),
+                SchemaAdjacency(entity='Room', relation='ASSIGNED_TO', direction='in', neighbor_entity='PoD', typedb_relation='pod-room-assignment', entity_role='assigned-room', neighbor_role='assigned-pod'),
             ],
             'WorkAssignment': [],
             'PoD': [],
@@ -46,6 +46,11 @@ def test_build_fact_queries_keeps_neighbor_adjacency_as_parallel_queries():
 
     relation_set = {item.traversals[0].relation for item in neighbor_queries}
     assert relation_set == {'OCCURS_IN', 'ASSIGNED_TO'}
+
+    occurs_in_query = next(item for item in neighbor_queries if item.traversals[0].relation == 'OCCURS_IN')
+    assert occurs_in_query.traversals[0].typedb_relation == 'work-assignment-room'
+    assert occurs_in_query.traversals[0].entity_role == 'assigned-room'
+    assert occurs_in_query.traversals[0].neighbor_role == 'assignment-record'
 
 
 def test_build_fact_queries_uses_generic_fallback_when_event_profile_missing():

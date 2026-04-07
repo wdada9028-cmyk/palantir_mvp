@@ -15,102 +15,47 @@ from cloud_delivery_ontology_palantir.instance_qa.typedb_client import (
 )
 
 
-class _FakeAttributeType:
-    def __init__(self, name: str):
-        self.name = name
-
-    def get_label(self):
-        return self
-
-
-class _FakeAttribute:
-    def __init__(self, name: str, value: object):
-        self._type = _FakeAttributeType(name)
+class _FakePromise:
+    def __init__(self, value=None, error: Exception | None = None):
         self._value = value
+        self._error = error
 
-    def get_type(self):
-        return self._type
-
-    def get_value(self):
+    def resolve(self):
+        if self._error is not None:
+            raise self._error
         return self._value
 
 
-class _FakeEntityType:
-    def __init__(self, name: str):
-        self.name = name
+class _FakeQueryAnswer:
+    def __init__(self, *, docs=None):
+        self._docs = docs or []
 
-    def get_label(self):
-        return self
-
-
-class _FakeEntity:
-    def __init__(self, entity: str, iid: str, attributes: dict[str, object]):
-        self._entity = entity
-        self._iid = iid
-        self._attributes = attributes
-
-    def is_entity(self):
+    def is_concept_documents(self):
         return True
 
-    def is_relation(self):
-        return False
-
-    def is_attribute(self):
-        return False
-
-    def as_entity(self):
-        return self
-
-    def get_iid(self):
-        return self._iid
-
-    def get_type(self):
-        return _FakeEntityType(self._entity)
-
-    def get_has(self, tx):
-        return [_FakeAttribute(name, value) for name, value in self._attributes.items()]
-
-
-class _FakeConceptMap:
-    def __init__(self, values: dict[str, object]):
-        self._values = values
-
-    def get(self, name: str):
-        return self._values.get(name)
+    def as_concept_documents(self):
+        return list(self._docs)
 
 
 class _FakeQueryManager:
-    def __init__(self, results=None, error: Exception | None = None):
-        self._results = results or []
+    def __init__(self, *, docs=None, error: Exception | None = None):
+        self._docs = docs or []
         self._error = error
         self.seen_queries: list[str] = []
 
-    def get(self, query: str):
+    def __call__(self, query: str):
         self.seen_queries.append(query)
-        if self._error is not None:
-            raise self._error
-        return list(self._results)
+        return _FakePromise(_FakeQueryAnswer(docs=self._docs), self._error)
 
 
 class _FakeTransaction:
-    def __init__(self, query_manager: _FakeQueryManager):
-        self.query = query_manager
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-
-class _FakeSession:
-    def __init__(self, query_manager: _FakeQueryManager, seen_sessions: list[tuple[str, object]]):
+    def __init__(self, query_manager: _FakeQueryManager, seen_calls: list[tuple[str, object]]):
         self._query_manager = query_manager
-        self._seen_sessions = seen_sessions
+        self._seen_calls = seen_calls
 
-    def transaction(self, transaction_type):
-        self._seen_sessions.append(('transaction', transaction_type))
-        return _FakeTransaction(self._query_manager)
+    def query(self, query: str):
+        self._seen_calls.append(('query', query))
+        return self._query_manager(query)
 
     def __enter__(self):
         return self
@@ -123,11 +68,14 @@ class _FakeDriver:
     def __init__(self, query_manager: _FakeQueryManager):
         self._query_manager = query_manager
         self.closed = False
-        self.seen_sessions: list[tuple[str, object]] = []
+        self.seen_calls: list[tuple[str, object]] = []
+        self.address = ''
+        self.credentials = None
+        self.driver_options = None
 
-    def session(self, database: str, session_type):
-        self.seen_sessions.append((database, session_type))
-        return _FakeSession(self._query_manager, self.seen_sessions)
+    def transaction(self, database: str, transaction_type, options=None):
+        self.seen_calls.append(('transaction', (database, transaction_type, options)))
+        return _FakeTransaction(self._query_manager, self.seen_calls)
 
     def close(self):
         self.closed = True
@@ -137,20 +85,30 @@ def _install_fake_typedb(monkeypatch, *, query_manager: _FakeQueryManager):
     fake_driver = _FakeDriver(query_manager)
     module = types.ModuleType('typedb.driver')
 
+    class _Credentials:
+        def __init__(self, username: str, password: str):
+            self.username = username
+            self.password = password
+
+    class _DriverOptions:
+        def __init__(self, is_tls_enabled: bool = True, tls_root_ca_path=None):
+            self.is_tls_enabled = is_tls_enabled
+            self.tls_root_ca_path = tls_root_ca_path
+
     class _TypeDB:
         @staticmethod
-        def core_driver(address: str):
+        def driver(address: str, credentials, driver_options):
             fake_driver.address = address
+            fake_driver.credentials = credentials
+            fake_driver.driver_options = driver_options
             return fake_driver
-
-    class _SessionType:
-        DATA = 'DATA'
 
     class _TransactionType:
         READ = 'READ'
 
     module.TypeDB = _TypeDB
-    module.SessionType = _SessionType
+    module.Credentials = _Credentials
+    module.DriverOptions = _DriverOptions
     module.TransactionType = _TransactionType
     monkeypatch.setitem(sys.modules, 'typedb', types.ModuleType('typedb'))
     monkeypatch.setitem(sys.modules, 'typedb.driver', module)
@@ -200,19 +158,24 @@ def test_load_typedb_config_rejects_partial_optional_credentials(monkeypatch):
         load_typedb_config()
 
 
-def test_execute_readonly_returns_root_entity_rows(monkeypatch):
+def test_execute_readonly_uses_typedb_3_driver_and_returns_root_entity_rows(monkeypatch):
     query_manager = _FakeQueryManager(
-        results=[
-            _FakeConceptMap({'root': _FakeEntity('room', 'iid-room-01', {'room-id': '01', 'room-status': 'active'})})
+        docs=[
+            {
+                'root': {
+                    'iid': 'iid-room-01',
+                    'data': {'room-id': '01', 'room-status': 'active'},
+                }
+            }
         ]
     )
     fake_driver = _install_fake_typedb(monkeypatch, query_manager=query_manager)
-    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='', password=''))
+    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='admin', password='password'))
     client.connect()
 
     rows = client.execute_readonly("""match
 $root isa room;
-$root has room-id \"01\";
+$root has room-id "01";
 get $root;
 limit 20;""")
 
@@ -225,34 +188,42 @@ limit 20;""")
         }
     ]
     assert fake_driver.address == 'localhost:1729'
-    assert ('cloud_delivery', 'DATA') in fake_driver.seen_sessions
-    assert ('transaction', 'READ') in fake_driver.seen_sessions
+    assert fake_driver.credentials.username == 'admin'
+    assert fake_driver.credentials.password == 'password'
+    assert fake_driver.driver_options.is_tls_enabled is False
+    assert ('transaction', ('cloud_delivery', 'READ', None)) in fake_driver.seen_calls
+    fetch_query = query_manager.seen_queries[0]
+    assert 'fetch {' in fetch_query
+    assert '"iid": iid($root)' in fetch_query
+    assert '"data": { $root.* }' in fetch_query
 
 
 def test_execute_readonly_returns_neighbor_rows_with_link_metadata(monkeypatch):
     query_manager = _FakeQueryManager(
-        results=[
-            _FakeConceptMap(
-                {
-                    'root': _FakeEntity('room', 'iid-room-01', {'room-id': '01'}),
-                    'n1': _FakeEntity('work-assignment', 'iid-wa-001', {'assignment-id': 'WA-001'}),
-                }
-            )
+        docs=[
+            {
+                'root': {
+                    'iid': 'iid-room-01',
+                    'data': {'room-id': '01'},
+                },
+                'n1': {
+                    'iid': 'iid-wa-001',
+                    'data': {'assignment-id': 'WA-001'},
+                },
+            }
         ]
     )
     _install_fake_typedb(monkeypatch, query_manager=query_manager)
-    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='', password=''))
+    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='admin', password='password'))
     client.connect()
 
-    rows = client.execute_readonly(
-        """match
+    rows = client.execute_readonly("""match
 $root isa room;
-$root has room-id \"01\";
-($n1, $root) isa occurs-in;
+$root has room-id "01";
+(assignment-record: $n1, assigned-room: $root) isa work-assignment-room;
 $n1 isa work-assignment;
 get $root, $n1;
-limit 20;"""
-    )
+limit 20;""")
 
     assert rows == [
         {
@@ -261,17 +232,40 @@ limit 20;"""
             'assignment_id': 'WA-001',
             '_source_entity': 'WorkAssignment',
             '_source_id': 'WA-001',
-            '_relation': 'OCCURS_IN',
+            '_relation': 'WORK_ASSIGNMENT_ROOM',
             '_target_entity': 'Room',
             '_target_id': '01',
         }
     ]
 
 
+def test_execute_readonly_normalizes_business_entity_names(monkeypatch):
+    query_manager = _FakeQueryManager(
+        docs=[
+            {
+                'root': {
+                    'iid': 'iid-ps-001',
+                    'data': {'pod-id': 'POD-001'},
+                }
+            }
+        ]
+    )
+    _install_fake_typedb(monkeypatch, query_manager=query_manager)
+    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='admin', password='password'))
+    client.connect()
+
+    rows = client.execute_readonly("""match
+$root isa pod-schedule;
+get $root;
+limit 20;""")
+
+    assert rows == [{'_entity': 'PoDSchedule', '_iid': 'iid-ps-001', 'pod_id': 'POD-001'}]
+
+
 def test_execute_readonly_wraps_query_errors(monkeypatch):
     query_manager = _FakeQueryManager(error=RuntimeError('boom'))
     _install_fake_typedb(monkeypatch, query_manager=query_manager)
-    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='', password=''))
+    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='admin', password='password'))
     client.connect()
 
     with pytest.raises(TypeDBQueryError, match='boom'):
@@ -281,28 +275,9 @@ get $root;""")
 
 
 def test_execute_readonly_requires_connection():
-    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='', password=''))
+    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='admin', password='password'))
 
     with pytest.raises(TypeDBConnectionError, match='not connected'):
         client.execute_readonly("""match
 $root isa room;
 get $root;""")
-
-
-
-def test_execute_readonly_normalizes_business_entity_names(monkeypatch):
-    query_manager = _FakeQueryManager(
-        results=[
-            _FakeConceptMap({'root': _FakeEntity('pod-schedule', 'iid-ps-001', {'pod-id': 'POD-001'})})
-        ]
-    )
-    _install_fake_typedb(monkeypatch, query_manager=query_manager)
-    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='', password=''))
-    client.connect()
-
-    rows = client.execute_readonly("""match
-$root isa pod-schedule;
-get $root;
-limit 20;""")
-
-    assert rows == [{'_entity': 'PoDSchedule', '_iid': 'iid-ps-001', 'pod_id': 'POD-001'}]

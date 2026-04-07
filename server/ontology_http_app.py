@@ -19,6 +19,8 @@ def create_app(*, input_file: Path) -> FastAPI:
     text = resolved_input_path.read_text(encoding='utf-8')
     spec = parse_definition_markdown(text, source_file=str(resolved_input_path))
     graph = build_definition_graph(spec)
+    if input_path.suffix.lower() == '.tql':
+        graph.metadata['typedb_schema_input_file'] = str(input_path)
     graph_payload = build_graph_payload(graph)
     html = build_interactive_graph_html(graph, title=graph.metadata.get('title', 'Ontology Graph'))
 

@@ -629,13 +629,9 @@ window.cytoscape = window.cytoscape || cytoscape;
         if (!lines.length) {
           return section.title || '';
         }
-        return `${section.title}
-${lines.map(line => `- ${line}`).join('
-')}`;
+        return `${section.title}\\n${lines.map(line => `- ${line}`).join('\\n')}`;
       }).filter(Boolean);
-      setQaTraceReport(sections.join('
-
-'));
+      setQaTraceReport(sections.join('\\n\\n'));
     }
 
     function updateInstanceQaStageSection(stageKey, title, lines) {
