@@ -84,3 +84,40 @@ def test_build_typeql_query_rejects_non_root_filters():
 
     with pytest.raises(ValueError, match='Non-root filters are not supported'):
         build_typeql_query(query)
+
+
+
+def test_build_typeql_query_preserves_pod_word_boundaries_in_entity_labels():
+    query = FactQueryDSL(
+        purpose='collect_neighbors',
+        root=FactQueryRoot(entity='Room', identifier=IdentifierRef(attribute='room_id', value='L1-A')),
+        traversals=[
+            FactQueryTraversal(
+                from_entity='Room',
+                relation='HAS',
+                typedb_relation='room-position',
+                entity_role='owner-room',
+                neighbor_role='owned-position',
+                direction='out',
+                to_entity='PoDPosition',
+                required=False,
+            ),
+            FactQueryTraversal(
+                from_entity='PoDPosition',
+                relation='APPLIES_TO',
+                typedb_relation='pod-schedule-pod',
+                entity_role='scheduled-pod',
+                neighbor_role='owning-schedule',
+                direction='in',
+                to_entity='PoDSchedule',
+                required=False,
+            ),
+        ],
+        projection={'Room': ['room_id'], 'PoDPosition': ['position_id'], 'PoDSchedule': ['pod_schedule_id']},
+        limit=10,
+    )
+
+    typeql = build_typeql_query(query)
+
+    assert '$n1 isa pod-position;' in typeql
+    assert '$n2 isa pod-schedule;' in typeql

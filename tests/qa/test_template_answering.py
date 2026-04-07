@@ -1,4 +1,4 @@
-from cloud_delivery_ontology_palantir.qa.template_answering import build_template_answer, _build_search_trace_report, _dedupe_trace_steps
+from cloud_delivery_ontology_palantir.qa.template_answering import build_instance_template_answer, build_template_answer, _build_search_trace_report, _dedupe_trace_steps
 from cloud_delivery_ontology_palantir.search.ontology_query_models import (
     EvidenceItem,
     OntologyEvidenceBundle,
@@ -159,3 +159,29 @@ def test_build_template_answer_keeps_insufficient_evidence_summary_user_facing()
     assert '\u8bbe\u5907\u843d\u4f4d\u70b9(PoD)' not in answer.answer
     assert '\u8bbe\u5907\u843d\u4f4d\u70b9' in answer.answer
     assert '[E1]' not in answer.answer
+
+
+
+def test_build_instance_template_answer_returns_clean_chinese_impact_summary():
+    fact_pack = {
+        'instances': {
+            'RoomMilestone': [{'milestone_id': 'RM-1'}],
+            'Floor': [{'floor_id': 'F1'}],
+            'PoDPosition': [{'position_id': 'P1'}],
+        }
+    }
+    reasoning_result = {
+        'summary': {'answer_type': 'impact_list'},
+        'impact_summary': {
+            'direct_counts': {'RoomMilestone': 1, 'Floor': 1, 'PoDPosition': 5},
+            'propagated_counts': {'PoD': 2},
+        },
+    }
+
+    answer = build_instance_template_answer('L1-A\u673a\u623f\u65ad\u7535\u4e00\u5468\uff0c\u4f1a\u6709\u54ea\u4e9b\u5f71\u54cd\uff1f', fact_pack, reasoning_result)
+
+    assert '\u5df2\u8bc6\u522b\u4ee5\u4e0b\u6f5c\u5728\u5f71\u54cd\uff1a' in answer.answer
+    assert '\u76f4\u63a5\u5f71\u54cd\uff1aRoomMilestone 1 \u4e2a\u3001Floor 1 \u4e2a\u3001PoDPosition 5 \u4e2a\u3002' in answer.answer
+    assert '\u4f20\u64ad\u5f71\u54cd\uff1aPoD 2 \u4e2a\u3002' in answer.answer
+    assert '\u5efa\u8bae\u4f18\u5148\u6838\u67e5\u65bd\u5de5\u5206\u914d\u3001\u76f8\u5173PoD\u3001\u65bd\u5de5\u6d3b\u52a8\u4e0ePoD\u6392\u671f\u3002' in answer.answer
+    assert '?' not in answer.answer

@@ -57,9 +57,13 @@ def build_typeql_query(query: FactQueryDSL) -> str:
 
 def _type_label(value: str) -> str:
     value = value.replace('_', '-')
+    if value == 'PoD':
+        return 'pod'
+    value = value.replace('PoD', 'Pod-')
     value = re.sub(r'([a-z0-9])([A-Z])', r'\1-\2', value)
     value = value.lower()
     value = value.replace('po-d', 'pod')
+    value = re.sub(r'-{2,}', '-', value).strip('-')
     return value
 
 

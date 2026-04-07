@@ -68,7 +68,9 @@ def test_instance_qa_stream_emits_new_event_order(tmp_path: Path):
     assert text.index('event: question_parsed') < text.index('event: question_dsl')
     assert text.index('event: question_dsl') < text.index('event: fact_query_planned')
     assert text.index('event: fact_query_planned') < text.index('event: typedb_result')
-    assert text.index('event: typedb_result') < text.index('event: reasoning_done')
+    assert text.index('event: typedb_result') < text.index('event: evidence_bundle_ready')
+    assert text.index('event: evidence_bundle_ready') < text.index('event: llm_answer_context_ready')
+    assert text.index('event: llm_answer_context_ready') < text.index('event: reasoning_done')
     assert text.index('event: reasoning_done') < text.index('event: answer_done')
 
 

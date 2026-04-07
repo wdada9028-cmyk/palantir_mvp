@@ -57,6 +57,20 @@ async def iter_qa_events(result: InstanceQAResult) -> AsyncIterator[str]:
     })
 
     step += 1
+    yield sse_event('evidence_bundle_ready', {
+        'session_id': session_id,
+        'step': step,
+        'evidence_bundle': result.evidence_bundle.to_dict(),
+    })
+
+    step += 1
+    yield sse_event('llm_answer_context_ready', {
+        'session_id': session_id,
+        'step': step,
+        'llm_answer_context': _llm_context_to_dict(result),
+    })
+
+    step += 1
     yield sse_event('reasoning_done', {
         'session_id': session_id,
         'step': step,
@@ -69,6 +83,7 @@ async def iter_qa_events(result: InstanceQAResult) -> AsyncIterator[str]:
         schema_summary={'entities': list(result.fact_pack.get('instances', {}).keys())},
         fact_pack=result.fact_pack,
         reasoning_result=result.reasoning,
+        llm_answer_context=result.llm_answer_context,
         fallback_answer=result.fallback_answer,
     ):
         if isinstance(chunk, GeneratorChunk):
@@ -95,6 +110,19 @@ async def iter_qa_events(result: InstanceQAResult) -> AsyncIterator[str]:
         'reasoning': result.reasoning,
         'fact_pack': result.fact_pack,
     })
+
+
+def _llm_context_to_dict(result: InstanceQAResult) -> dict[str, object]:
+    context = result.llm_answer_context
+    return {
+        'system_prompt': context.system_prompt,
+        'task_prompt': context.task_prompt,
+        'evidence_contract_prompt': context.evidence_contract_prompt,
+        'style_prompt': context.style_prompt,
+        'user_payload': context.user_payload,
+    }
+
+
 
 
 def _question_to_dict(question) -> dict[str, object]:

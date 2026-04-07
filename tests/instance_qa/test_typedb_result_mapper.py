@@ -105,3 +105,35 @@ def test_map_typedb_rows_to_fact_pack_uses_entity_specific_identifier_priority()
             'assignment_status': 'open',
         }
     ]
+
+
+def test_map_typedb_rows_to_fact_pack_preserves_iid_in_payload():
+    rows = [
+        {'_entity': 'Floor', '_iid': '0x1e0002', 'floor_id': 'L1', 'floor_no': 1}
+    ]
+
+    fact_pack = map_typedb_rows_to_fact_pack(rows, purpose='collect_neighbors')
+
+    assert fact_pack['instances']['Floor'][0]['iid'] == '0x1e0002'
+    assert fact_pack['instances']['Floor'][0]['floor_id'] == 'L1'
+
+
+def test_map_typedb_rows_to_fact_pack_uses_iid_as_dedupe_priority_when_present():
+    rows = [
+        {
+            '_entity': 'WorkAssignment',
+            '_iid': '0xwa1',
+            'assignment_id': 'WA-001',
+            'assignment_status': 'open',
+        },
+        {
+            '_entity': 'WorkAssignment',
+            '_iid': '0xwa2',
+            'assignment_id': 'WA-001',
+            'assignment_status': 'open',
+        },
+    ]
+
+    fact_pack = map_typedb_rows_to_fact_pack(rows, purpose='collect_neighbors')
+
+    assert fact_pack['counts']['WorkAssignment'] == 2

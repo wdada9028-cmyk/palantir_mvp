@@ -14,6 +14,7 @@ class SchemaEntity:
     object_id: str
     attributes: list[str] = field(default_factory=list)
     key_attributes: list[str] = field(default_factory=list)
+    zh_label: str = ''
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +72,7 @@ def build_schema_registry(graph: OntologyGraph) -> SchemaRegistry:
             object_id=obj.id,
             attributes=attributes,
             key_attributes=key_attributes,
+            zh_label=str(obj.attributes.get('chinese_description') or '').strip(),
         )
         adjacency.setdefault(entity_name, [])
 

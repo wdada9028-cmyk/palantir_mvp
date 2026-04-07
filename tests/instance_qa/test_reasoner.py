@@ -91,3 +91,60 @@ def test_assess_deadline_risk_includes_reason_codes_and_supporting_facts():
     assert result['deadline_assessment']['reason_codes']
     assert result['deadline_assessment']['supporting_facts']
     assert result['summary']['confidence'] == 'high'
+
+
+
+def test_build_reasoning_result_classifies_direct_and_propagated_impacts_from_three_hop_chain():
+    fact_pack = {
+        'instances': {
+            'Room': [{'room_id': 'L1-A'}],
+            'WorkAssignment': [{'assignment_id': 'WA-001'}],
+            'PoD': [{'pod_id': 'POD-001'}],
+            'ActivityInstance': [{'activity_id': 'ACT-001'}],
+            'PoDSchedule': [{'pod_schedule_id': 'SCH-001'}],
+        },
+        'links': [
+            {
+                'source_entity': 'WorkAssignment',
+                'source_id': 'WA-001',
+                'relation': 'WORK_ASSIGNMENT_ROOM',
+                'target_entity': 'Room',
+                'target_id': 'L1-A',
+            },
+            {
+                'source_entity': 'WorkAssignment',
+                'source_id': 'WA-001',
+                'relation': 'WORK_ASSIGNMENT_POD',
+                'target_entity': 'PoD',
+                'target_id': 'POD-001',
+            },
+            {
+                'source_entity': 'PoD',
+                'source_id': 'POD-001',
+                'relation': 'POD_ACTIVITY',
+                'target_entity': 'ActivityInstance',
+                'target_id': 'ACT-001',
+            },
+            {
+                'source_entity': 'PoDSchedule',
+                'source_id': 'SCH-001',
+                'relation': 'POD_SCHEDULE_POD',
+                'target_entity': 'PoD',
+                'target_id': 'POD-001',
+            },
+        ],
+        'metadata': {
+            'purpose': 'instance_qa',
+            'anchor': {'entity': 'Room', 'id': 'L1-A'},
+        },
+    }
+
+    result = build_reasoning_result(fact_pack, mode='impact_analysis')
+
+    assert result['impact_summary']['direct_counts'] == {'WorkAssignment': 1}
+    assert result['impact_summary']['propagated_counts'] == {
+        'PoD': 1,
+        'ActivityInstance': 1,
+        'PoDSchedule': 1,
+    }
+    assert result['summary']['risk_level'] == 'high'

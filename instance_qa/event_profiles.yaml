@@ -1,4 +1,4 @@
-﻿events:
+events:
   generic_incident:
     relation_priority:
       - OCCURS_IN
@@ -6,6 +6,7 @@
       - ASSIGNED_TO
       - APPLIES_TO
       - HAS
+    impact_propagation: {}
   power_outage:
     relation_priority:
       - OCCURS_IN
@@ -13,6 +14,20 @@
       - APPLIES_TO
       - HAS
       - ASSIGNED_TO
+    impact_propagation:
+      PoDPosition:
+        - relation: ASSIGNED_TO
+          neighbor_entity: PoD
+        - relation: OCCURS_AT
+          neighbor_entity: WorkAssignment
+      WorkAssignment:
+        - relation: ASSIGNS
+          neighbor_entity: PoD
+      PoD:
+        - relation: HAS
+          neighbor_entity: ActivityInstance
+        - relation: APPLIES_TO
+          neighbor_entity: PoDSchedule
   fire:
     relation_priority:
       - OCCURS_IN
@@ -20,6 +35,20 @@
       - APPLIES_TO
       - HAS
       - ASSIGNED_TO
+    impact_propagation:
+      PoDPosition:
+        - relation: ASSIGNED_TO
+          neighbor_entity: PoD
+        - relation: OCCURS_AT
+          neighbor_entity: WorkAssignment
+      WorkAssignment:
+        - relation: ASSIGNS
+          neighbor_entity: PoD
+      PoD:
+        - relation: HAS
+          neighbor_entity: ActivityInstance
+        - relation: APPLIES_TO
+          neighbor_entity: PoDSchedule
   delay:
     relation_priority:
       - DEPENDS_ON
@@ -27,6 +56,7 @@
       - APPLIES_TO
       - ASSIGNS
       - OCCURS_IN
+    impact_propagation: {}
   capacity_loss:
     relation_priority:
       - EXECUTES
@@ -34,6 +64,7 @@
       - OCCURS_IN
       - APPLIES_TO
       - HAS
+    impact_propagation: {}
   access_blocked:
     relation_priority:
       - OCCURS_IN
@@ -41,3 +72,17 @@
       - APPLIES_TO
       - HAS
       - ASSIGNED_TO
+    impact_propagation:
+      PoDPosition:
+        - relation: ASSIGNED_TO
+          neighbor_entity: PoD
+        - relation: OCCURS_AT
+          neighbor_entity: WorkAssignment
+      WorkAssignment:
+        - relation: ASSIGNS
+          neighbor_entity: PoD
+      PoD:
+        - relation: HAS
+          neighbor_entity: ActivityInstance
+        - relation: APPLIES_TO
+          neighbor_entity: PoDSchedule

@@ -1,5 +1,6 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
+from collections import Counter
 from datetime import date
 
 _TIME_ATTRIBUTES = (
@@ -11,6 +12,8 @@ _TIME_ATTRIBUTES = (
     'latest_finish_time',
     'due_time',
 )
+_IMPACT_MAX_DEPTH = 3
+_IMPACT_PRIORITY = ('WorkAssignment', 'PoD', 'ActivityInstance', 'PoDSchedule', 'RoomMilestone', 'Floor', 'PlacementPlan', 'Crew')
 
 
 def build_reasoning_result(
@@ -23,13 +26,15 @@ def build_reasoning_result(
         return assess_deadline_risk(fact_pack, deadline=deadline)
 
     affected_entities = _collect_affected_entities(fact_pack)
+    impact_summary = _build_impact_summary(affected_entities)
     return {
         'summary': {
             'answer_type': 'impact_list',
-            'risk_level': 'medium' if affected_entities else 'unknown',
-            'confidence': 'medium' if affected_entities else 'low',
+            'risk_level': _impact_risk_level(impact_summary),
+            'confidence': _impact_confidence(impact_summary),
         },
         'affected_entities': affected_entities,
+        'impact_summary': impact_summary,
         'deadline_assessment': {
             'deadline': deadline,
             'at_risk': False,
@@ -70,6 +75,7 @@ def assess_deadline_risk(fact_pack: dict[str, object], *, deadline: str) -> dict
             'confidence': confidence,
         },
         'affected_entities': matched_items,
+        'impact_summary': {'direct_counts': {}, 'propagated_counts': {}},
         'deadline_assessment': {
             'deadline': deadline,
             'at_risk': at_risk,
@@ -96,7 +102,7 @@ def _collect_affected_entities(fact_pack: dict[str, object]) -> list[dict[str, o
     anchor = _anchor_from_metadata(fact_pack)
     links = _links(fact_pack)
     if anchor and links:
-        return _collect_via_links(anchor, links)[:20]
+        return _collect_via_links(anchor, links, max_depth=_IMPACT_MAX_DEPTH)[:50]
 
     items: list[dict[str, object]] = []
     for entity_name, rows in _iter_instances(fact_pack):
@@ -106,9 +112,10 @@ def _collect_affected_entities(fact_pack: dict[str, object]) -> list[dict[str, o
                     'entity': entity_name,
                     'id': _instance_identifier(entity_name, row),
                     'reason': 'Matched instance in fact pack',
+                    'depth': 1,
                 }
             )
-    return items[:20]
+    return items[:50]
 
 
 def _anchor_from_metadata(fact_pack: dict[str, object]) -> tuple[str, str] | None:
@@ -148,11 +155,11 @@ def _links(fact_pack: dict[str, object]) -> list[dict[str, str]]:
     return result
 
 
-def _collect_via_links(anchor: tuple[str, str], links: list[dict[str, str]]) -> list[dict[str, object]]:
+def _collect_via_links(anchor: tuple[str, str], links: list[dict[str, str]], *, max_depth: int) -> list[dict[str, object]]:
     frontier = {anchor}
     visited = {anchor}
     affected: list[dict[str, object]] = []
-    for _ in range(2):
+    for depth in range(1, max_depth + 1):
         next_frontier: set[tuple[str, str]] = set()
         for link in links:
             source = (link['source_entity'], link['source_id'])
@@ -160,19 +167,65 @@ def _collect_via_links(anchor: tuple[str, str], links: list[dict[str, str]]) -> 
             if source in frontier and target not in visited:
                 visited.add(target)
                 next_frontier.add(target)
-                affected.append({'entity': target[0], 'id': target[1], 'reason': f"{source[0]}({source[1]}) --{link['relation']}--> {target[0]}({target[1]})"})
+                affected.append({'entity': target[0], 'id': target[1], 'reason': f"{source[0]}({source[1]}) --{link['relation']}--> {target[0]}({target[1]})", 'depth': depth})
             if target in frontier and source not in visited:
                 visited.add(source)
                 next_frontier.add(source)
-                affected.append({'entity': source[0], 'id': source[1], 'reason': f"{source[0]}({source[1]}) --{link['relation']}--> {target[0]}({target[1]})"})
+                affected.append({'entity': source[0], 'id': source[1], 'reason': f"{source[0]}({source[1]}) --{link['relation']}--> {target[0]}({target[1]})", 'depth': depth})
         frontier = next_frontier
         if not frontier:
             break
     return affected
 
 
+def _build_impact_summary(items: list[dict[str, object]]) -> dict[str, object]:
+    direct = Counter()
+    propagated = Counter()
+    for item in items:
+        entity = str(item.get('entity') or '').strip()
+        if not entity:
+            continue
+        depth = int(item.get('depth') or 1)
+        if depth <= 1:
+            direct[entity] += 1
+        else:
+            propagated[entity] += 1
+    return {
+        'direct_counts': _ordered_counts(direct),
+        'propagated_counts': _ordered_counts(propagated),
+    }
+
+
+def _ordered_counts(counter: Counter) -> dict[str, int]:
+    ordered_entities = [entity for entity in _IMPACT_PRIORITY if counter.get(entity)]
+    ordered_entities.extend(sorted(entity for entity in counter if entity not in ordered_entities))
+    return {entity: counter[entity] for entity in ordered_entities}
+
+
+def _impact_risk_level(impact_summary: dict[str, object]) -> str:
+    propagated = impact_summary.get('propagated_counts') if isinstance(impact_summary, dict) else {}
+    direct = impact_summary.get('direct_counts') if isinstance(impact_summary, dict) else {}
+    if isinstance(propagated, dict) and any(entity in propagated for entity in ('PoD', 'ActivityInstance', 'PoDSchedule')):
+        return 'high'
+    if isinstance(propagated, dict) and propagated:
+        return 'medium'
+    if isinstance(direct, dict) and direct:
+        return 'medium'
+    return 'unknown'
+
+
+def _impact_confidence(impact_summary: dict[str, object]) -> str:
+    propagated = impact_summary.get('propagated_counts') if isinstance(impact_summary, dict) else {}
+    direct = impact_summary.get('direct_counts') if isinstance(impact_summary, dict) else {}
+    if isinstance(propagated, dict) and propagated:
+        return 'high'
+    if isinstance(direct, dict) and direct:
+        return 'medium'
+    return 'low'
+
+
 def _instance_identifier(entity_name: str, row: dict[str, object]) -> str:
-    for key in ('id', f'{entity_name.lower()}_id', 'pod_code', 'assignment_id', 'activity_id'):
+    for key in ('id', f'{entity_name.lower()}_id', 'pod_code', 'assignment_id', 'activity_id', 'pod_schedule_id'):
         value = row.get(key)
         if value is not None and str(value).strip():
             return str(value)

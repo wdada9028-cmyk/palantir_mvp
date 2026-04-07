@@ -1,16 +1,44 @@
-# Session Log
-
 ## Current State
 - Agent: Codex
 - Branch: codex/typedb-instance-qa-design
-- Last session: 2026-04-03 09:17
-- Active work: replaced schema-only QA with TypeDB-backed instance QA path and wired UI stage playback
+- Last session: 2026-04-07 18:47
+- Active work: implemented evidence-driven TypeDB instance QA path through evidence bundle assembly, LLM answer context building, generator integration, and SSE evidence stages
 - Blockers: None
 - Next steps:
-  - Review the current diff and split/commit Task 8 and Task 9 changes if desired
-  - Smoke the `/api/qa/stream` path against a real read-only TypeDB environment via env vars
+  - Decide whether to commit the current branch diff now
+  - Optionally tighten negative-evidence classification for entities that were queried but did not hit instances
+  - Optionally add a stronger end-to-end generator success-path integration test
 
 ## Session History
+
+### 2026-04-07 18:44 - Codex
+**What was done:**
+- Added evidence models, evidence subgraph builder, schema-instance aligner, evidence bundle builder, prompts, and LLM answer context builder
+- Integrated the instance generator with evidence-driven prompts and wired orchestrator/service to emit `evidence_bundle_ready` and `llm_answer_context_ready`
+- Added and updated instance/server/integration/generator tests for the new evidence-driven path
+- Ran `pytest tests/instance_qa -q`, `pytest tests/server/test_ontology_http_app.py tests/integration/test_instance_qa_stream.py tests/integration/test_definition_graph_export.py -q`, and `pytest tests -q`
+
+**Decisions made:**
+- Keep backend responsibility focused on evidence collection/structuring and let the LLM do final reasoning under prompt constraints
+- Preserve full matched instance rows with attribute names and iid in evidence payloads rather than pre-filtering attributes in the backend
+- Keep the old template answer as fallback while moving the main instance-answer path to evidence-driven prompts
+
+**Open questions:**
+- Whether to commit the full evidence-driven diff now or continue with more UX/prompt refinements first
+
+### 2026-04-07 14:29 - Codex
+**What was done:**
+- Reproduced the backend `????` summary issue and rewrote `build_instance_template_answer(...)` with clean Chinese fallback text
+- Added PoDPosition propagation rules so Room event impact analysis can expand through `PoDPosition -> PoD` and `PoDPosition -> WorkAssignment`
+- Added planner/server regression coverage for the PoDPosition bridge and updated answer-summary assertions
+- Ran `pytest tests/qa/test_template_answering.py -q`, `pytest tests/instance_qa -q`, `pytest tests/server/test_ontology_http_app.py tests/integration/test_instance_qa_stream.py tests/integration/test_definition_graph_export.py -q`, and `pytest tests -q`
+
+**Decisions made:**
+- Treat the `????` output as a backend template corruption issue, not a frontend rendering issue
+- Keep propagation controlled by backend-maintained event profiles and extend the MVP with the PoDPosition bridge instead of free-form query expansion
+
+**Open questions:**
+- Whether to commit the current branch diff now or continue with more real-dataset smoke checks first
 
 ### 2026-04-03 09:17 - Codex
 **What was done:**

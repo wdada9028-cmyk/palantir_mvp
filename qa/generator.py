@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator
 
 from .template_answering import TemplateAnswer, _dedupe_trace_steps, _relation_name, _summary_name
 from ..search.ontology_query_models import OntologyEvidenceBundle
+from ..instance_qa.llm_answer_context_builder import LLMAnswerContext
 
 _DEFAULT_MODEL = 'qwen2.5-32b-instruct'
 
@@ -170,15 +171,16 @@ async def iter_generated_instance_answer(
     schema_summary: dict[str, object],
     fact_pack: dict[str, object],
     reasoning_result: dict[str, object],
+    llm_answer_context: LLMAnswerContext | None = None,
     fallback_answer: TemplateAnswer,
 ) -> AsyncIterator[GeneratorChunk | GeneratorResult]:
     config = _load_config()
-    if config is None:
+    if config is None or llm_answer_context is None:
         yield GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
         return
 
-    fact_summary = _build_instance_fact_summary(fact_pack, reasoning_result)
-    if not fact_summary:
+    messages = _build_instance_messages(question, llm_answer_context)
+    if not messages:
         yield GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
         return
 
@@ -189,25 +191,7 @@ async def iter_generated_instance_answer(
             model=config.model,
             temperature=0.1,
             stream=True,
-            messages=[
-                {
-                    'role': 'system',
-                    'content': (
-                        '你是云交付实例问答助手。'
-                        '请结合 schema 摘要与事实包，用中文给出准确、简洁、可执行的结论。'
-                        '不得虚构事实，证据不足时要明确说明。'
-                    ),
-                },
-                {
-                    'role': 'user',
-                    'content': (
-                        f'用户问题：{question}\n\n'
-                        f'Schema 摘要：{schema_summary}\n\n'
-                        f'事实与推理：\n{fact_summary}\n\n'
-                        '请输出最终回答。'
-                    ),
-                },
-            ],
+            messages=messages,
         )
         async for chunk in stream:
             delta = _extract_delta_text(chunk)
@@ -226,24 +210,13 @@ async def iter_generated_instance_answer(
     yield GeneratorResult(answer_text=answer_text, used_fallback=False)
 
 
-def _build_instance_fact_summary(fact_pack: dict[str, object], reasoning_result: dict[str, object]) -> str:
-    instances = fact_pack.get('instances') if isinstance(fact_pack, dict) else {}
-    counts = fact_pack.get('counts') if isinstance(fact_pack, dict) else {}
-    lines: list[str] = []
-    if isinstance(counts, dict) and counts:
-        for entity, count in counts.items():
-            lines.append(f'- {entity}：{count} 条')
-    if isinstance(instances, dict):
-        for entity, items in instances.items():
-            if not isinstance(items, list) or not items:
-                continue
-            lines.append(f'- {entity} 示例：{items[0]}')
-
-    summary = reasoning_result.get('summary') if isinstance(reasoning_result, dict) else None
-    deadline = reasoning_result.get('deadline_assessment') if isinstance(reasoning_result, dict) else None
-    if summary:
-        lines.append(f'- 推理摘要：{summary}')
-    if deadline:
-        lines.append(f'- 截止评估：{deadline}')
-
-    return '\n'.join(lines)
+def _build_instance_messages(question: str, llm_context: LLMAnswerContext) -> list[dict[str, str]]:
+    messages = llm_context.to_messages()
+    if len(messages) < 2:
+        return []
+    user_content = str(messages[1].get('content', ''))
+    messages[1] = {
+        'role': 'user',
+        'content': f'\u7528\u6237\u95ee\u9898\uff1a{question}\n\n{user_content}',
+    }
+    return messages

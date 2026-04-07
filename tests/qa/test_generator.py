@@ -2,8 +2,16 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from cloud_delivery_ontology_palantir.qa.generator import GeneratorChunk, GeneratorResult, _build_fact_lines, _build_messages, iter_generated_answer
+from cloud_delivery_ontology_palantir.qa.generator import GeneratorChunk, GeneratorResult, _build_fact_lines, _build_messages, _build_instance_messages, iter_generated_answer, iter_generated_instance_answer
 from cloud_delivery_ontology_palantir.qa.template_answering import TemplateAnswer
+
+from cloud_delivery_ontology_palantir.instance_qa.evidence_models import (
+    EvidenceBundle,
+    EntityEvidenceGroup,
+    InstanceEvidence,
+    SchemaContext,
+)
+from cloud_delivery_ontology_palantir.instance_qa.llm_answer_context_builder import build_llm_answer_context
 from cloud_delivery_ontology_palantir.search.ontology_query_models import (
     EvidenceItem,
     OntologyEvidenceBundle,
@@ -200,3 +208,69 @@ def test_iter_generated_answer_falls_back_after_mid_stream_exception(monkeypatch
     assert isinstance(chunks[0], GeneratorChunk)
     assert chunks[0].delta == '\u7ed3\u8bba\uff1a'
     assert chunks[-1] == GeneratorResult(answer_text='deterministic fallback', used_fallback=True)
+
+
+def _build_evidence_context():
+    bundle = EvidenceBundle(
+        question='L1-A??????????????',
+        understanding={'anchor': {'entity': 'Room', 'id': 'L1-A'}},
+        positive_evidence=[
+            EntityEvidenceGroup(
+                entity='PoDPosition',
+                instances=[
+                    InstanceEvidence(
+                        entity='PoDPosition',
+                        iid='0xpos1',
+                        business_keys={'position_id': 'POS-001'},
+                        attributes={'position_id': 'POS-001', 'position_status': 'ready'},
+                        schema_context=SchemaContext(
+                            entity_name='PoDPosition',
+                            entity_zh='PoD??',
+                            key_attributes=['position_id'],
+                            relevant_relations=['ROOM_POSITION'],
+                        ),
+                        paths=['Room(L1-A) --ROOM_POSITION--> PoDPosition(POS-001)'],
+                    )
+                ],
+            )
+        ],
+        edges=[],
+        paths=['Room(L1-A) --ROOM_POSITION--> PoDPosition(POS-001)'],
+        empty_entities=[],
+        unrelated_entities=[],
+        omitted_entities=[],
+    )
+    return build_llm_answer_context(bundle)
+
+
+def test_build_instance_messages_uses_evidence_bundle_payload():
+    messages = _build_instance_messages(question='?????', llm_context=_build_evidence_context())
+
+    assert messages[0]['role'] == 'system'
+    assert 'empty_entities' in messages[1]['content']
+    assert 'attributes' in messages[1]['content']
+
+
+async def _collect_instance(question: str, llm_context, fallback: TemplateAnswer):
+    items = []
+    async for item in iter_generated_instance_answer(
+        question,
+        schema_summary={},
+        fact_pack={},
+        reasoning_result={},
+        llm_answer_context=llm_context,
+        fallback_answer=fallback,
+    ):
+        items.append(item)
+    return items
+
+
+def test_iter_generated_instance_answer_falls_back_when_context_missing(monkeypatch):
+    fallback = TemplateAnswer(answer='deterministic fallback', insufficient_evidence=False)
+
+    monkeypatch.setenv('QWEN_API_BASE', 'https://example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'test-key')
+
+    chunks = asyncio.run(_collect_instance('?????', None, fallback))
+
+    assert chunks == [GeneratorResult(answer_text='deterministic fallback', used_fallback=True)]

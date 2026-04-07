@@ -3,7 +3,7 @@ from __future__ import annotations
 from .fact_query_models import FactQueryDSL
 from .schema_registry import SchemaRegistry
 
-_ALLOWED_PURPOSES = {'resolve_anchor', 'collect_neighbors'}
+_ALLOWED_PURPOSES = {'resolve_anchor', 'collect_neighbors', 'propagate_neighbors'}
 _ALLOWED_FILTER_OPS = {'eq', 'in', 'gt', 'gte', 'lt', 'lte'}
 _ALLOWED_AGGREGATES = {None, 'count'}
 _ALLOWED_SORT_DIRECTIONS = {'asc', 'desc'}

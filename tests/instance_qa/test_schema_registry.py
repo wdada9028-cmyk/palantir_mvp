@@ -38,6 +38,7 @@ def test_build_schema_registry_collects_entity_attributes_and_key_attributes():
     room = registry.entities['Room']
     assert room.attributes == ['room_id', 'rack_slot', 'room_status']
     assert room.key_attributes == ['room_id', 'rack_slot', 'room_status']
+    assert room.zh_label == graph.objects['object_type:Room'].attributes.get('chinese_description')
 
 
 def test_build_schema_registry_collects_directional_adjacency_and_relations():

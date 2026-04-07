@@ -5,6 +5,7 @@ from collections import defaultdict
 
 _LINK_KEYS = ('_source_entity', '_source_id', '_relation', '_target_entity', '_target_id')
 _GLOBAL_IDENTIFIER_CANDIDATES = (
+    'iid',
     'id',
     'project_id',
     'building_id',
@@ -63,6 +64,9 @@ def map_typedb_rows_to_fact_pack(rows: list[dict[str, object]], *, purpose: str)
             for key, value in row.items()
             if key not in {'_entity', 'entity', *_LINK_KEYS}
         }
+        iid_value = row.get('_iid') if isinstance(row, dict) else None
+        if iid_value is not None and str(iid_value).strip():
+            payload['iid'] = str(iid_value).strip()
         grouped[entity].append(payload)
 
         link = _extract_link(row)
@@ -109,6 +113,10 @@ def _dedupe_instances(entity: str, rows: list[dict[str, object]]) -> list[dict[s
 
 def _instance_dedupe_key(entity: str, row: dict[str, object]) -> tuple[object, ...]:
     entity_lower = _normalize_entity_key(entity)
+
+    iid = row.get('iid')
+    if iid is not None and str(iid).strip():
+        return ('iid', entity, str(iid).strip())
 
     for attr in _ENTITY_IDENTIFIER_PRIORITY.get(entity_lower, ()):
         value = row.get(attr)

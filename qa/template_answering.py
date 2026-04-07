@@ -195,19 +195,56 @@ def build_instance_template_answer(question: str, fact_pack: dict[str, object], 
 
     summary = reasoning_result.get('summary', {}) if isinstance(reasoning_result, dict) else {}
     deadline_assessment = reasoning_result.get('deadline_assessment', {}) if isinstance(reasoning_result, dict) else {}
+    impact_summary = reasoning_result.get('impact_summary', {}) if isinstance(reasoning_result, dict) else {}
 
     if summary.get('answer_type') == 'deadline_risk':
         at_risk = bool(deadline_assessment.get('at_risk'))
-        deadline = deadline_assessment.get('deadline')
+        deadline = str(deadline_assessment.get('deadline') or '').strip() or '\u76ee\u6807\u65e5\u671f'
         supporting = deadline_assessment.get('supporting_facts') or []
         if at_risk:
-            detail = f' 关键依据：{supporting[0]}。' if supporting else ''
-            return TemplateAnswer(answer=f'存在交付风险：{question} 可能影响截止日期 {deadline}。{detail}', insufficient_evidence=False)
-        return TemplateAnswer(answer=f'当前未发现明确交付风险：{question} 在截止日期 {deadline} 前暂无直接风险证据。', insufficient_evidence=False)
+            detail = f"\u4e3b\u8981\u4f9d\u636e\uff1a{supporting[0]}\u3002" if supporting else ''
+            return TemplateAnswer(
+                answer=f"\u5224\u65ad\u7ed3\u679c\uff1a\u95ee\u9898\u201c{question}\u201d\u53ef\u80fd\u5f71\u54cd {deadline} \u4ea4\u4ed8\u3002{detail}",
+                insufficient_evidence=False,
+            )
+        return TemplateAnswer(
+            answer=f"\u5224\u65ad\u7ed3\u679c\uff1a\u5f53\u524d\u8bc1\u636e\u663e\u793a\u95ee\u9898\u201c{question}\u201d\u6682\u672a\u5f71\u54cd {deadline} \u4ea4\u4ed8\u3002",
+            insufficient_evidence=False,
+        )
 
     if instance_count <= 0:
-        return TemplateAnswer(answer=f'证据不足：当前未检索到与“{question}”直接相关的实例数据。', insufficient_evidence=True)
+        return TemplateAnswer(
+            answer=f"\u8bc1\u636e\u4e0d\u8db3\uff1a\u5f53\u524d\u672a\u68c0\u7d22\u5230\u4e0e\u201c{question}\u201d\u76f4\u63a5\u76f8\u5173\u7684\u5b9e\u4f8b\u6570\u636e\u3002",
+            insufficient_evidence=True,
+        )
+
+    direct_counts = impact_summary.get('direct_counts') if isinstance(impact_summary, dict) else {}
+    propagated_counts = impact_summary.get('propagated_counts') if isinstance(impact_summary, dict) else {}
+    if (isinstance(direct_counts, dict) and direct_counts) or (isinstance(propagated_counts, dict) and propagated_counts):
+        parts: list[str] = ['\u5df2\u8bc6\u522b\u4ee5\u4e0b\u6f5c\u5728\u5f71\u54cd\uff1a']
+        if isinstance(direct_counts, dict) and direct_counts:
+            parts.append(f"\u76f4\u63a5\u5f71\u54cd\uff1a{_format_impact_counts(direct_counts)}\u3002")
+        if isinstance(propagated_counts, dict) and propagated_counts:
+            parts.append(f"\u4f20\u64ad\u5f71\u54cd\uff1a{_format_impact_counts(propagated_counts)}\u3002")
+        parts.append('\u5efa\u8bae\u4f18\u5148\u6838\u67e5\u65bd\u5de5\u5206\u914d\u3001\u76f8\u5173PoD\u3001\u65bd\u5de5\u6d3b\u52a8\u4e0ePoD\u6392\u671f\u3002')
+        return TemplateAnswer(answer=''.join(parts), insufficient_evidence=False)
 
     affected = reasoning_result.get('affected_entities') if isinstance(reasoning_result, dict) else []
     affected_count = len(affected) if isinstance(affected, list) else 0
-    return TemplateAnswer(answer=f'已识别潜在受影响对象 {affected_count or instance_count} 个，建议优先核查关键路径任务。', insufficient_evidence=False)
+    return TemplateAnswer(
+        answer=f"\u5df2\u8bc6\u522b\u6f5c\u5728\u53d7\u5f71\u54cd\u5bf9\u8c61 {affected_count or instance_count} \u4e2a\uff0c\u5efa\u8bae\u4f18\u5148\u6838\u67e5\u5173\u952e\u8def\u5f84\u4efb\u52a1\u3002",
+        insufficient_evidence=False,
+    )
+
+
+def _format_impact_counts(counts: dict[str, object]) -> str:
+    parts: list[str] = []
+    for entity, value in counts.items():
+        try:
+            count = int(value)
+        except Exception:
+            count = 0
+        if count <= 0:
+            continue
+        parts.append(f'{entity} {count} \u4e2a')
+    return '\u3001'.join(parts) if parts else '\u65e0'
