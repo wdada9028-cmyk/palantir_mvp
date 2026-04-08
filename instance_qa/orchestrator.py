@@ -17,6 +17,7 @@ from .question_validator import validate_question_dsl
 from .llm_answer_context_builder import LLMAnswerContext, build_llm_answer_context
 from .reasoner import build_reasoning_result
 from .schema_registry import SchemaEntity, SchemaRegistry, build_schema_registry
+from .trace_summary_builder import build_trace_summary
 from .typeql_builder import build_typeql_query
 from .typedb_client import TypeDBClient, TypeDBConnectionError, TypeDBQueryError, load_typedb_config
 from .typedb_result_mapper import map_typedb_rows_to_fact_pack
@@ -33,6 +34,7 @@ class InstanceQAResult:
     evidence_bundle: EvidenceBundle
     llm_answer_context: LLMAnswerContext
     reasoning: dict[str, object]
+    trace_summary: dict[str, object]
     fallback_answer: TemplateAnswer
 
 
@@ -113,6 +115,12 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
         mode=question_dsl.mode,
         deadline=question_dsl.goal.deadline,
     )
+    trace_summary = build_trace_summary(
+        question_dsl=question_dsl,
+        fact_pack=fact_pack,
+        evidence_bundle=evidence_bundle,
+        reasoning_result=reasoning,
+    )
     fallback_answer = build_instance_template_answer(question, fact_pack, reasoning)
 
     return InstanceQAResult(
@@ -125,6 +133,7 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
         evidence_bundle=evidence_bundle,
         llm_answer_context=llm_answer_context,
         reasoning=reasoning,
+        trace_summary=trace_summary,
         fallback_answer=fallback_answer,
     )
 

@@ -246,12 +246,23 @@ def test_exported_html_contains_streaming_answer_and_trace_sections(tmp_path: Pa
     text = output.read_text(encoding='utf-8')
 
     assert 'answer_delta' in text
-    assert 'trace_report' in text
+    assert 'trace_summary_ready' in text
     assert '\u903b\u8f91\u6eaf\u6e90' in text
     assert 'answer_text_so_far' in text
     assert 'qa-answer-text' in text
     assert 'qa-trace-report' in text
 
+
+
+def test_exported_html_prefers_trace_summary_sections_over_debug_log_text(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'renderTraceSummarySection' in text
+    assert 'renderTraceSummaryCard' in text
+    assert 'trace-summary-expanded' in text
+    assert 'typeql:' not in text
 
 
 def test_build_graph_payload_does_not_append_group_text_for_ungrouped_object_type():
@@ -317,8 +328,10 @@ def test_exported_html_contains_instance_qa_stage_handlers(tmp_path: Path):
     assert 'typedb_query' in text
     assert 'typedb_result' in text
     assert 'reasoning_done' in text
+    assert 'trace_summary_ready' in text
     assert 'handleInstanceQaStageEvent' in text
-    assert 'renderInstanceQaTraceReport' in text
+    assert 'renderTraceSummaryCard' in text
+    assert 'renderInstanceQaTraceReport' not in text
 
 
 

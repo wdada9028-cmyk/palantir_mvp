@@ -77,6 +77,13 @@ async def iter_qa_events(result: InstanceQAResult) -> AsyncIterator[str]:
         'reasoning': result.reasoning,
     })
 
+    step += 1
+    yield sse_event('trace_summary_ready', {
+        'session_id': session_id,
+        'step': step,
+        'trace_summary': result.trace_summary,
+    })
+
     final_result: GeneratorResult | None = None
     async for chunk in iter_generated_instance_answer(
         result.question,
@@ -109,6 +116,7 @@ async def iter_qa_events(result: InstanceQAResult) -> AsyncIterator[str]:
         'used_fallback': final_result.used_fallback,
         'reasoning': result.reasoning,
         'fact_pack': result.fact_pack,
+        'trace_summary': result.trace_summary,
     })
 
 

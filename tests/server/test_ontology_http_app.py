@@ -87,7 +87,38 @@ def test_qa_stream_emits_instance_qa_pipeline_events(tmp_path: Path):
     assert 'event: evidence_bundle_ready' in text
     assert 'event: llm_answer_context_ready' in text
     assert 'event: reasoning_done' in text
+    assert 'event: trace_summary_ready' in text
     assert 'event: answer_done' in text
+
+
+def test_qa_stream_emits_trace_summary_ready_and_answer_done_contains_trace_summary(tmp_path: Path):
+    input_file = tmp_path / 'ontology.md'
+    _write_relation_ontology(input_file)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': '01??????????'})
+
+    assert response.status_code == 200
+
+    trace_summary_payload = _event_payloads(response.text, 'trace_summary_ready')[0]
+    answer_done_payload = _event_payloads(response.text, 'answer_done')[0]
+
+    assert set(trace_summary_payload['trace_summary']['compact'].keys()) == {
+        'question_understanding',
+        'key_evidence',
+        'data_gaps',
+        'reasoning_basis',
+    }
+    assert set(trace_summary_payload['trace_summary']['expanded'].keys()) == {
+        'detailed_evidence',
+        'key_paths',
+        'miss_explanations',
+        'detailed_reasoning_basis',
+    }
+    assert answer_done_payload['trace_summary'] == trace_summary_payload['trace_summary']
+    assert 'trace_report' not in answer_done_payload
+    assert 'typeql' not in json.dumps(answer_done_payload['trace_summary'], ensure_ascii=False)
 
 
 def test_qa_stream_question_dsl_detects_power_outage_mode(tmp_path: Path):

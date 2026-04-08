@@ -1,15 +1,80 @@
+# Session Log
+
 ## Current State
 - Agent: Codex
 - Branch: codex/typedb-instance-qa-design
-- Last session: 2026-04-07 18:47
-- Active work: implemented evidence-driven TypeDB instance QA path through evidence bundle assembly, LLM answer context building, generator integration, and SSE evidence stages
+- Last session: 2026-04-08 10:36
+- Active work: integrated compact/expanded trace summary into instance QA backend, SSE, and UI
 - Blockers: None
 - Next steps:
-  - Decide whether to commit the current branch diff now
-  - Optionally tighten negative-evidence classification for entities that were queried but did not hit instances
-  - Optionally add a stronger end-to-end generator success-path integration test
+  - Smoke-test `/api/qa/stream` in the browser with a real TypeDB-backed question
+  - If UI output is accepted, stage and commit the trace-summary changes
 
 ## Session History
+
+### 2026-04-08 10:36 - Codex
+**What was done:**
+- Reworked `instance_qa/trace_summary_builder.py` to output compact/expanded customer-facing summaries with Chinese business labels, data gaps, miss explanations, and reasoning basis
+- Extended `InstanceQAResult`, wired `trace_summary_ready` in SSE, and included `trace_summary` in `answer_done`
+- Reworked `export/graph_export.py` so the QA panel renders trace summaries instead of raw query-log text while preserving playback/status hooks
+- Added/updated trace-summary coverage in instance/server/integration tests and re-ran targeted plus full-suite verification
+
+**Decisions made:**
+- Keep compact trace visible by default and put detailed sections behind a single expanded details block
+- Stop using raw TypeQL/debug text as the customer-facing trace source; keep stage events only for status/playback needs
+
+**Open questions:**
+- Whether to commit the current trace-summary/UI changes now or do one more live browser smoke with a real dataset first
+
+### %s - Codex
+**What was done:**
+- Reviewed Task 2 code quality for instance_qa/trace_summary_builder.py and tests/instance_qa/test_trace_summary_builder.py
+- Re-ran pytest tests/instance_qa/test_trace_summary_builder.py -q and confirmed 6 passed
+- Verified compact evidence selection drops useful attributes for realistic business_keys-only inputs
+- Verified compact totals ignore omitted_entities overflow and can undercount true hits
+
+**Decisions made:**
+- Review result: CHANGES_REQUESTED for Task 2 code quality
+
+**Open questions:**
+- None
+
+### 2026-04-07 21:04 - Codex
+**What was done:**
+- Reviewed Task 2 spec compliance for instance_qa/trace_summary_builder.py and tests/instance_qa/test_trace_summary_builder.py
+- Verified compact key evidence now caps item lists, preserves total counts, and limits per-instance fields
+- Ran pytest tests/instance_qa/test_trace_summary_builder.py -q and confirmed 6 passed
+
+**Decisions made:**
+- Review result: PASS for Task 2 spec compliance
+
+**Open questions:**
+- None
+
+### 2026-04-07 20:43 - Codex
+**What was done:**
+- Re-reviewed Task 1 spec compliance for instance_qa/trace_summary_builder.py and tests/instance_qa/test_trace_summary_builder.py
+- Verified updated trace summary output uses business-facing labels and compact/expanded-only sections
+- Ran pytest tests/instance_qa/test_trace_summary_builder.py -q and confirmed 2 passed
+- Printed a sample build_trace_summary(...) result to confirm the serialized output no longer exposes raw enum/debug values for the covered case
+
+**Decisions made:**
+- Review result: PASS for Task 1 spec compliance after fixes
+
+**Open questions:**
+- None
+
+### 2026-04-07 20:38 - Codex
+**What was done:**
+- Reviewed Task 1 spec compliance for instance_qa/trace_summary_builder.py and tests/instance_qa/test_trace_summary_builder.py
+- Checked plan requirements for deterministic builder, compact/expanded-only structure, business-facing fields, and TDD coverage
+- Ran pytest tests/instance_qa/test_trace_summary_builder.py -q and confirmed 1 passed
+
+**Decisions made:**
+- Review result: CHANGES_REQUESTED for Task 1 spec compliance
+
+**Open questions:**
+- None
 
 ### 2026-04-07 18:44 - Codex
 **What was done:**

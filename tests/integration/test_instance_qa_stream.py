@@ -71,7 +71,8 @@ def test_instance_qa_stream_emits_new_event_order(tmp_path: Path):
     assert text.index('event: typedb_result') < text.index('event: evidence_bundle_ready')
     assert text.index('event: evidence_bundle_ready') < text.index('event: llm_answer_context_ready')
     assert text.index('event: llm_answer_context_ready') < text.index('event: reasoning_done')
-    assert text.index('event: reasoning_done') < text.index('event: answer_done')
+    assert text.index('event: reasoning_done') < text.index('event: trace_summary_ready')
+    assert text.index('event: trace_summary_ready') < text.index('event: answer_done')
 
 
 @pytest.mark.parametrize(
@@ -111,3 +112,31 @@ def test_instance_qa_stream_detects_deadline_mode(tmp_path: Path, deadline_keywo
     question_payload = _event_payloads(response.text, 'question_dsl')[0]
     assert question_payload['question_dsl']['mode'] == 'deadline_risk_check'
     assert question_payload['question_dsl']['scenario']['event_type'] == 'fire'
+
+
+def test_instance_qa_stream_answer_done_contains_trace_summary_sections(tmp_path: Path):
+    input_file = tmp_path / 'ontology.md'
+    _write_ontology(input_file)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': '01??????????'})
+
+    assert response.status_code == 200
+    trace_summary_payload = _event_payloads(response.text, 'trace_summary_ready')[0]
+    answer_payload = _event_payloads(response.text, 'answer_done')[0]
+
+    assert answer_payload['trace_summary'] == trace_summary_payload['trace_summary']
+    assert set(answer_payload['trace_summary']['compact']) == {
+        'question_understanding',
+        'key_evidence',
+        'data_gaps',
+        'reasoning_basis',
+    }
+    assert set(answer_payload['trace_summary']['expanded']) == {
+        'detailed_evidence',
+        'key_paths',
+        'miss_explanations',
+        'detailed_reasoning_basis',
+    }
+

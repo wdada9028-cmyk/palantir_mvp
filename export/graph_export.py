@@ -143,9 +143,16 @@ def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive
     .evidence-timeline button { width: 100%; text-align: left; }
     .qa-answer-text { min-height: 72px; line-height: 1.7; font-size: 15px; color: #f8fafc; white-space: pre-wrap; }
     .qa-trace-report { color: #cbd5e1; }
-    .qa-trace-report-body { margin-top: 8px; line-height: 1.7; white-space: pre-wrap; color: #cbd5e1; }
+    .qa-trace-report-body { margin-top: 8px; line-height: 1.7; white-space: normal; color: #cbd5e1; }
     .qa-trace-report summary { cursor: pointer; list-style: none; }
     .qa-trace-report summary::-webkit-details-marker { display: none; }
+    .trace-summary-section { border-top: 1px solid rgba(148,163,184,0.18); padding-top: 10px; margin-top: 10px; }
+    .trace-summary-section:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+    .trace-summary-list { margin: 0; padding-left: 18px; }
+    .trace-summary-list li { margin: 6px 0; }
+    .trace-summary-inline { color: #e2e8f0; }
+    .trace-summary-expanded { margin-top: 10px; border-top: 1px dashed rgba(148,163,184,0.24); padding-top: 10px; }
+    .trace-summary-expanded summary { color: #93c5fd; font-weight: 700; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -203,11 +210,21 @@ window.cytoscape = window.cytoscape || cytoscape;
     const qaStatusBody = qaStatusCard.querySelector('div:last-child');
     const qaEvidenceTimelineBody = qaEvidenceTimelineCard.querySelector('div:last-child');
     const defaultPanelHtml = __DEFAULT_PANEL_JSON__;
+    const TRACE_SUMMARY_TITLES = {
+      question_understanding: '\u95ee\u9898\u7406\u89e3',
+      key_evidence: '\u5173\u952e\u8bc1\u636e',
+      data_gaps: '\u6570\u636e\u7f3a\u53e3',
+      reasoning_basis: '\u7ed3\u8bba\u4f9d\u636e',
+      detailed_evidence: '\u8be6\u7ec6\u8bc1\u636e\u5bf9\u8c61',
+      key_paths: '\u5173\u952e\u8def\u5f84',
+      miss_explanations: '\u672a\u547d\u4e2d\u8bf4\u660e',
+      detailed_reasoning_basis: '\u8be6\u7ec6\u7ed3\u8bba\u4f9d\u636e',
+    };
     let qaEventSource = null;
     let persistedEvidenceChain = [];
     let persistedEvidenceMap = new Map();
     let evidenceSnapshots = new Map();
-    let instanceQaStageSections = new Map();
+    let currentTraceSummary = null;
     let playbackController = null;
     let activeDetailNode = null;
     let detailCardFrame = null;
@@ -400,8 +417,8 @@ window.cytoscape = window.cytoscape || cytoscape;
       qaAnswerText.innerHTML = escapeHtml(message || '');
     }
 
-    function setQaTraceReport(message) {
-      if (!message) {
+    function setQaTraceSummary(traceSummary) {
+      if (!traceSummary || typeof traceSummary !== 'object') {
         qaTraceReportCard.classList.add('hidden');
         qaTraceReportCard.open = false;
         qaTraceReportBody.innerHTML = '\u7b49\u5f85\u6eaf\u6e90';
@@ -409,7 +426,135 @@ window.cytoscape = window.cytoscape || cytoscape;
       }
       qaTraceReportCard.classList.remove('hidden');
       qaTraceReportCard.open = true;
-      qaTraceReportBody.innerHTML = escapeHtml(message);
+      qaTraceReportBody.innerHTML = renderTraceSummaryCard(traceSummary);
+    }
+
+    function renderTraceSummaryCard(traceSummary) {
+      const compactKeys = ['question_understanding', 'key_evidence', 'data_gaps', 'reasoning_basis'];
+      const expandedKeys = ['detailed_evidence', 'key_paths', 'miss_explanations', 'detailed_reasoning_basis'];
+      const compactHtml = compactKeys.map(key => renderTraceSummarySection(TRACE_SUMMARY_TITLES[key], traceSummary.compact && traceSummary.compact[key], key)).join('');
+      const expandedHtml = expandedKeys.map(key => renderTraceSummarySection(TRACE_SUMMARY_TITLES[key], traceSummary.expanded && traceSummary.expanded[key], key)).join('');
+      const expandedBlock = expandedHtml
+        ? `<details class="trace-summary-expanded"><summary>\u5c55\u5f00\u8be6\u60c5</summary>${expandedHtml}</details>`
+        : '';
+      return compactHtml || expandedBlock ? `${compactHtml}${expandedBlock}` : '<div class="muted">\u6682\u65e0\u6eaf\u6e90\u6458\u8981</div>';
+    }
+
+    function renderTraceSummarySection(title, value, sectionKey) {
+      const body = formatTraceSummarySection(sectionKey, value);
+      if (!body) return '';
+      return `<div class="trace-summary-section"><div class="section-title">${escapeHtml(title)}</div>${body}</div>`;
+    }
+
+    function formatTraceSummarySection(sectionKey, value) {
+      if (!value || (Array.isArray(value) && !value.length)) {
+        return '<div class="muted">\u6682\u65e0</div>';
+      }
+      if (sectionKey === 'question_understanding') return formatQuestionUnderstanding(value);
+      if (sectionKey === 'key_evidence') return formatKeyEvidence(value);
+      if (sectionKey === 'data_gaps') return formatSimpleTraceList(value, 'message');
+      if (sectionKey === 'reasoning_basis') return formatStringList(value);
+      if (sectionKey === 'detailed_evidence') return formatDetailedEvidence(value);
+      if (sectionKey === 'key_paths') return formatSimpleTraceList(value, 'path_summary');
+      if (sectionKey === 'miss_explanations') return formatMissExplanations(value);
+      if (sectionKey === 'detailed_reasoning_basis') return formatReasoningPairs(value);
+      return formatGenericTraceValue(value);
+    }
+
+    function formatQuestionUnderstanding(value) {
+      if (!value || typeof value !== 'object') return '';
+      const anchor = value.anchor && typeof value.anchor === 'object' ? value.anchor : {};
+      const anchorText = anchor.entity
+        ? `${anchor.entity}${anchor.id ? ` (${anchor.id})` : ''}`
+        : '';
+      return formatTraceKeyValueRows([
+        ['\u95ee\u9898\u7c7b\u578b', value.question_type],
+        ['\u951a\u70b9\u5bf9\u8c61', anchorText],
+        ['\u4e8b\u4ef6', value.scenario],
+        ['\u76ee\u6807', value.goal],
+      ]);
+    }
+
+    function formatKeyEvidence(value) {
+      const directHits = value && typeof value === 'object' && value.direct_hits && typeof value.direct_hits === 'object'
+        ? value.direct_hits
+        : {};
+      const items = Object.entries(directHits).map(([entity, info]) => {
+        const safeInfo = info && typeof info === 'object' ? info : {};
+        const label = safeInfo.label || entity;
+        const total = Number(safeInfo.total || 0);
+        const previews = Array.isArray(safeInfo.items)
+          ? safeInfo.items.map(item => formatTraceObjectInline(item)).filter(Boolean)
+          : [];
+        const previewText = previews.length ? `\uff1b${previews.join('\uff1b')}` : '';
+        return `<li><strong>${escapeHtml(label)}</strong>\uff1a${escapeHtml(String(total))} \u4e2a${previewText}</li>`;
+      });
+      return items.length ? `<ul class="list trace-summary-list">${items.join('')}</ul>` : '<div class="muted">\u6682\u65e0\u5173\u952e\u8bc1\u636e</div>';
+    }
+
+    function formatDetailedEvidence(value) {
+      if (!Array.isArray(value) || !value.length) return '<div class="muted">\u6682\u65e0\u8be6\u7ec6\u8bc1\u636e</div>';
+      const items = value.map(group => {
+        const safeGroup = group && typeof group === 'object' ? group : {};
+        const label = safeGroup.label || safeGroup.entity || '';
+        const instances = Array.isArray(safeGroup.instances) ? safeGroup.instances.map(item => formatTraceObjectInline(item)).filter(Boolean) : [];
+        return `<li><strong>${escapeHtml(String(label))}</strong>\uff1a${instances.length ? escapeHtml(instances.join('\uff1b')) : '\u6682\u65e0\u5b9e\u4f8b\u660e\u7ec6'}</li>`;
+      });
+      return `<ul class="list trace-summary-list">${items.join('')}</ul>`;
+    }
+
+    function formatMissExplanations(value) {
+      if (!Array.isArray(value) || !value.length) return '<div class="muted">\u65e0</div>';
+      const items = value.map(item => {
+        const safeItem = item && typeof item === 'object' ? item : {};
+        const entity = safeItem.entity || '';
+        const type = safeItem.type || '';
+        const reason = safeItem.reason || '';
+        const omitted = safeItem.omitted_count ? ` (${safeItem.omitted_count})` : '';
+        return `<li><strong>${escapeHtml(String(entity))}</strong>\uff08${escapeHtml(String(type))}${escapeHtml(String(omitted))}\uff09\uff1a${escapeHtml(String(reason))}</li>`;
+      });
+      return `<ul class="list trace-summary-list">${items.join('')}</ul>`;
+    }
+
+    function formatReasoningPairs(value) {
+      if (!Array.isArray(value) || !value.length) return '<div class="muted">\u65e0</div>';
+      return `<ul class="list trace-summary-list">${value.map(item => {
+        const safeItem = item && typeof item === 'object' ? item : {};
+        return `<li><strong>${escapeHtml(String(safeItem.label || ''))}</strong>\uff1a${escapeHtml(String(safeItem.value || ''))}</li>`;
+      }).join('')}</ul>`;
+    }
+
+    function formatSimpleTraceList(value, field) {
+      if (!Array.isArray(value) || !value.length) return '<div class="muted">\u65e0</div>';
+      return `<ul class="list trace-summary-list">${value.map(item => {
+        if (item && typeof item === 'object') {
+          return `<li>${escapeHtml(String(item[field] || ''))}</li>`;
+        }
+        return `<li>${escapeHtml(String(item || ''))}</li>`;
+      }).join('')}</ul>`;
+    }
+
+    function formatTraceKeyValueRows(rows) {
+      const lines = rows.map(([label, value]) => {
+        if (!value) return '';
+        return `<div class="trace-summary-inline"><strong>${escapeHtml(label)}</strong>\uff1a${escapeHtml(String(value))}</div>`;
+      }).filter(Boolean);
+      return lines.join('');
+    }
+
+    function formatTraceObjectInline(value) {
+      if (!value || typeof value !== 'object') return '';
+      return Object.entries(value).map(([key, itemValue]) => `${key}=${itemValue}`).join('\uff0c');
+    }
+
+    function formatGenericTraceValue(value) {
+      if (Array.isArray(value)) {
+        return formatStringList(value.map(item => item && typeof item === 'object' ? JSON.stringify(item) : item));
+      }
+      if (value && typeof value === 'object') {
+        return formatStringList(Object.entries(value).map(([key, itemValue]) => `${key}: ${itemValue}`));
+      }
+      return `<div class="trace-summary-inline">${escapeHtml(String(value || ''))}</div>`;
     }
 
     function clearTraceClasses() {
@@ -470,13 +615,13 @@ window.cytoscape = window.cytoscape || cytoscape;
       setQaStatus('\u7b49\u5f85\u63d0\u95ee');
       qaAnswerCard.classList.add('hidden');
       qaAnswerText.textContent = '\u7b49\u5f85\u56de\u7b54';
-      setQaTraceReport('');
+      currentTraceSummary = null;
+      setQaTraceSummary(null);
       qaEvidenceTimelineCard.classList.add('hidden');
       qaEvidenceTimelineBody.innerHTML = '\u7b49\u5f85\u68c0\u7d22';
       persistedEvidenceChain = [];
       persistedEvidenceMap = new Map();
       evidenceSnapshots = new Map();
-      instanceQaStageSections = new Map();
       clearTraceClasses();
       setFilteringState(false);
       clearPlaybackTimers(playbackController);
@@ -619,29 +764,6 @@ window.cytoscape = window.cytoscape || cytoscape;
       renderEvidenceTimeline(persistedEvidenceChain);
     }
 
-    function renderInstanceQaTraceReport() {
-      if (!instanceQaStageSections.size) {
-        setQaTraceReport('');
-        return;
-      }
-      const sections = Array.from(instanceQaStageSections.values()).map(section => {
-        const lines = Array.isArray(section.lines) ? section.lines.filter(Boolean) : [];
-        if (!lines.length) {
-          return section.title || '';
-        }
-        return `${section.title}\\n${lines.map(line => `- ${line}`).join('\\n')}`;
-      }).filter(Boolean);
-      setQaTraceReport(sections.join('\\n\\n'));
-    }
-
-    function updateInstanceQaStageSection(stageKey, title, lines) {
-      const normalizedLines = Array.isArray(lines)
-        ? lines.map(line => String(line || '').trim()).filter(Boolean)
-        : [];
-      instanceQaStageSections.set(stageKey, { title: String(title || '').trim(), lines: normalizedLines });
-      renderInstanceQaTraceReport();
-    }
-
     function findNodeIdsForEntityNames(entityNames) {
       const wanted = new Set((entityNames || []).map(value => String(value || '').trim()).filter(Boolean));
       if (!wanted.size) return [];
@@ -699,18 +821,23 @@ window.cytoscape = window.cytoscape || cytoscape;
 
     function handleInstanceQaStageEvent(eventType, payload) {
       const safePayload = payload && typeof payload === 'object' ? payload : {};
+      if (eventType === 'trace_summary_ready') {
+        currentTraceSummary = safePayload.trace_summary && typeof safePayload.trace_summary === 'object'
+          ? safePayload.trace_summary
+          : null;
+        setQaTraceSummary(currentTraceSummary);
+        setQaStatus('\u5df2\u751f\u6210\u903b\u8f91\u6eaf\u6e90');
+        return;
+      }
+
       if (eventType === 'question_parsed') {
         const message = safePayload.normalized_query
-          ? `已解析问题：${safePayload.normalized_query}`
-          : '已完成问题解析';
+          ? `\u5df2\u89e3\u6790\u95ee\u9898\uff1a${safePayload.normalized_query}`
+          : '\u5df2\u5b8c\u6210\u95ee\u9898\u89e3\u6790';
         setQaStatus(message);
-        updateInstanceQaStageSection('question_parsed', '问题解析', [
-          safePayload.question ? `原问题：${safePayload.question}` : '',
-          safePayload.normalized_query ? `归一化：${safePayload.normalized_query}` : '',
-        ]);
         upsertEvidenceItem({
           evidence_id: 'stage:question_parsed',
-          label: '问题解析',
+          label: '\u95ee\u9898\u89e3\u6790',
           kind: 'stage',
           message,
           why_matched: [],
@@ -722,19 +849,11 @@ window.cytoscape = window.cytoscape || cytoscape;
         const questionDsl = safePayload.question_dsl && typeof safePayload.question_dsl === 'object' ? safePayload.question_dsl : {};
         const anchor = questionDsl.anchor && typeof questionDsl.anchor === 'object' ? questionDsl.anchor : {};
         const scenario = questionDsl.scenario && typeof questionDsl.scenario === 'object' ? questionDsl.scenario : {};
-        const goal = questionDsl.goal && typeof questionDsl.goal === 'object' ? questionDsl.goal : {};
-        const message = `已识别锚点 ${anchor.entity || '-'} / 事件 ${scenario.event_type || '-'} / 模式 ${questionDsl.mode || '-'}`;
+        const message = `\u5df2\u8bc6\u522b\u9526\u70b9 ${anchor.entity || '-'} / \u4e8b\u4ef6 ${scenario.event_type || '-'} / \u6a21\u5f0f ${questionDsl.mode || '-'}`;
         setQaStatus(message);
-        updateInstanceQaStageSection('question_dsl', '结构化理解', [
-          questionDsl.mode ? `mode: ${questionDsl.mode}` : '',
-          anchor.entity ? `anchor: ${anchor.entity}${anchor.identifier && anchor.identifier.value ? `(${anchor.identifier.value})` : ''}` : '',
-          scenario.event_type ? `event: ${scenario.event_type}` : '',
-          goal.deadline ? `deadline: ${goal.deadline}` : '',
-          safePayload.validation_error ? `validation_error: ${safePayload.validation_error}` : '',
-        ]);
         upsertEvidenceItem({
           evidence_id: 'stage:question_dsl',
-          label: '结构化理解',
+          label: '\u7ed3\u6784\u5316\u7406\u89e3',
           kind: 'stage',
           message,
           why_matched: safePayload.validation_error ? [safePayload.validation_error] : [],
@@ -747,42 +866,27 @@ window.cytoscape = window.cytoscape || cytoscape;
 
       if (eventType === 'fact_query_planned') {
         const factQueries = Array.isArray(safePayload.fact_queries) ? safePayload.fact_queries : [];
-        const message = `已生成 ${factQueries.length} 条查询计划`;
+        const message = `\u5df2\u751f\u6210 ${factQueries.length} \u6761\u5b9e\u4f8b\u67e5\u8be2\u8ba1\u5212`;
         setQaStatus(message);
-        updateInstanceQaStageSection('fact_query_planned', '查询计划', [
-          ...factQueries.slice(0, 5).map(item => {
-            const purpose = item && item.purpose ? item.purpose : 'query';
-            const rowCount = item && item.row_count !== undefined && item.row_count !== null ? ` rows=${item.row_count}` : '';
-            const error = item && item.error ? ` error=${item.error}` : '';
-            return `${purpose}${rowCount}${error}`;
-          }),
-          factQueries.length > 5 ? `... +${factQueries.length - 5} more` : '',
-        ]);
         upsertEvidenceItem({
           evidence_id: 'stage:fact_query_planned',
-          label: '查询计划',
+          label: '\u67e5\u8be2\u8ba1\u5212',
           kind: 'stage',
           message,
-          why_matched: factQueries.slice(0, 5).map(item => item && item.purpose ? String(item.purpose) : 'query'),
+          why_matched: [],
         }, { node_ids: [], edge_ids: [] });
         return;
       }
 
       if (eventType === 'typedb_query') {
-        const purpose = safePayload.purpose || 'query';
-        const message = `正在执行 TypeDB 查询：${purpose}`;
+        const message = '\u6b63\u5728\u67e5\u8be2\u5b9e\u4f8b\u6570\u636e';
         setQaStatus(message);
-        updateInstanceQaStageSection(`typedb_query:${purpose}`, '执行 TypeDB 查询', [
-          `purpose: ${purpose}`,
-          safePayload.error ? `error: ${safePayload.error}` : '',
-          safePayload.typeql ? `typeql: ${safePayload.typeql}` : '',
-        ]);
         upsertEvidenceItem({
-          evidence_id: `stage:typedb_query:${purpose}`,
-          label: '执行 TypeDB 查询',
+          evidence_id: `stage:typedb_query:${safePayload.purpose || 'query'}`,
+          label: '\u5b9e\u4f8b\u67e5\u8be2',
           kind: 'stage',
           message,
-          why_matched: [safePayload.typeql ? String(safePayload.typeql) : ''],
+          why_matched: [],
         }, { node_ids: [], edge_ids: [] });
         return;
       }
@@ -793,18 +897,12 @@ window.cytoscape = window.cytoscape || cytoscape;
         const countLines = Object.entries(counts).map(([entity, count]) => `${entity}: ${count}`);
         const total = Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
         const message = total > 0
-          ? `已获取 ${total} 条实例结果`
-          : '未检索到实例结果';
+          ? `\u5df2\u547d\u4e2d ${total} \u6761\u5b9e\u4f8b\u7ed3\u679c`
+          : '\u5f53\u524d\u672a\u547d\u4e2d\u5b9e\u4f8b\u7ed3\u679c';
         setQaStatus(message);
-        updateInstanceQaStageSection('typedb_result', '实例结果', [
-          ...countLines,
-          factPack.metadata && factPack.metadata.question_validation_error
-            ? `validation_error: ${factPack.metadata.question_validation_error}`
-            : '',
-        ]);
         upsertEvidenceItem({
           evidence_id: 'stage:typedb_result',
-          label: '实例结果',
+          label: '\u5b9e\u4f8b\u7ed3\u679c',
           kind: 'stage',
           message,
           why_matched: countLines,
@@ -815,26 +913,15 @@ window.cytoscape = window.cytoscape || cytoscape;
       if (eventType === 'reasoning_done') {
         const reasoning = safePayload.reasoning && typeof safePayload.reasoning === 'object' ? safePayload.reasoning : {};
         const summary = reasoning.summary && typeof reasoning.summary === 'object' ? reasoning.summary : {};
-        const deadlineAssessment = reasoning.deadline_assessment && typeof reasoning.deadline_assessment === 'object'
-          ? reasoning.deadline_assessment
-          : {};
-        const message = `已完成推理：${summary.answer_type || 'result'}`;
+        const message = `\u5df2\u5b8c\u6210\u63a8\u7406\uff1a${summary.answer_type || 'result'}`;
         setQaStatus(message);
-        updateInstanceQaStageSection('reasoning_done', '推理结论', [
-          summary.answer_type ? `answer_type: ${summary.answer_type}` : '',
-          summary.risk_level ? `risk_level: ${summary.risk_level}` : '',
-          summary.confidence ? `confidence: ${summary.confidence}` : '',
-          deadlineAssessment.deadline ? `deadline: ${deadlineAssessment.deadline}` : '',
-          deadlineAssessment.at_risk !== undefined ? `at_risk: ${Boolean(deadlineAssessment.at_risk)}` : '',
-        ]);
         upsertEvidenceItem({
           evidence_id: 'stage:reasoning_done',
-          label: '推理结论',
+          label: '\u63a8\u7406\u7ed3\u8bba',
           kind: 'stage',
           message,
-          why_matched: Array.isArray(deadlineAssessment.supporting_facts) ? deadlineAssessment.supporting_facts : [],
+          why_matched: [],
         }, buildReasoningSnapshot(reasoning));
-        return;
       }
     }
 
@@ -869,7 +956,7 @@ window.cytoscape = window.cytoscape || cytoscape;
         if (['trace_anchor', 'trace_expand', 'evidence_final'].includes(eventType)) {
           this.traceProtocolSeen = true;
         }
-        if (['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done'].includes(eventType)) {
+        if (['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done', 'trace_summary_ready'].includes(eventType)) {
           this.instanceQaProtocolSeen = true;
         }
         this.queue.push({ eventType, payload });
@@ -897,7 +984,7 @@ window.cytoscape = window.cytoscape || cytoscape;
         if (payload && payload.message) {
           setQaStatus(payload.message);
         }
-        if (['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done'].includes(eventType)) {
+        if (['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done', 'trace_summary_ready'].includes(eventType)) {
           handleInstanceQaStageEvent(eventType, payload || {});
           return;
         }
@@ -925,8 +1012,9 @@ window.cytoscape = window.cytoscape || cytoscape;
             persistFinalEvidence(payload || {});
           }
           setQaAnswer(payload.answer_text || payload.answer || '');
-          if (payload.trace_report) {
-            setQaTraceReport(payload.trace_report || '');
+          if (payload.trace_summary) {
+            currentTraceSummary = payload.trace_summary;
+            setQaTraceSummary(payload.trace_summary);
           }
         }
       }
@@ -947,7 +1035,7 @@ window.cytoscape = window.cytoscape || cytoscape;
       setQaStatus('\\u6b63\\u5728\\u68c0\\u7d22\\u672c\\u4f53\\u8bc1\\u636e...');
       const eventSource = new EventSource(`/api/qa/stream?q=${encodeURIComponent(trimmedQuestion)}`);
       qaEventSource = eventSource;
-      ['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done', 'trace_anchor', 'trace_expand', 'evidence_final', 'answer_delta', 'answer_done'].forEach(eventType => {
+      ['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done', 'trace_summary_ready', 'trace_anchor', 'trace_expand', 'evidence_final', 'answer_delta', 'answer_done'].forEach(eventType => {
         eventSource.addEventListener(eventType, event => {
           const payload = JSON.parse(event.data);
           playbackController.enqueue(eventType, payload);
