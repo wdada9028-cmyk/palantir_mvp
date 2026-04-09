@@ -66,6 +66,50 @@ def test_resolve_intent_returns_llm_seeds_from_openai_compatible_payload(monkeyp
     assert result.error == ''
 
 
+
+
+def test_resolve_intent_ignores_intent_specific_base_key_and_uses_shared_base_key_with_intent_model(monkeypatch):
+    graph = _build_graph()
+
+    monkeypatch.setenv('QWEN_API_BASE', 'https://shared.example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'shared-key')
+    monkeypatch.setenv('QWEN_MODEL', 'shared-model')
+    monkeypatch.setenv('QWEN_INTENT_API_BASE', 'https://intent.example.com/v1')
+    monkeypatch.setenv('QWEN_INTENT_API_KEY', 'intent-key')
+    monkeypatch.setenv('QWEN_INTENT_MODEL', 'intent-model')
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'choices': [
+                    {
+                        'message': {
+                            'content': '{"seeds": ["object_type:ArrivalPlan"], "reasoning": "????????"}'
+                        }
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def post(self, url, headers=None, json=None, timeout=None):
+            assert url == 'https://shared.example.com/v1/chat/completions'
+            assert headers == {'Authorization': 'Bearer shared-key'}
+            assert json['model'] == 'intent-model'
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        'cloud_delivery_ontology_palantir.search.intent_resolver.get_http_client',
+        lambda: FakeClient(),
+    )
+
+    result = resolve_intent(graph, '???????')
+
+    assert result.seeds == ['object_type:ArrivalPlan']
+    assert result.source == 'llm'
+
 def test_resolve_intent_falls_back_on_invalid_json(monkeypatch):
     graph = _build_graph()
 
@@ -110,6 +154,7 @@ def test_resolve_intent_returns_disabled_when_config_is_missing(monkeypatch):
     monkeypatch.delenv('QWEN_API_BASE', raising=False)
     monkeypatch.delenv('QWEN_API_KEY', raising=False)
     monkeypatch.delenv('QWEN_MODEL', raising=False)
+    monkeypatch.delenv('QWEN_INTENT_MODEL', raising=False)
 
     result = resolve_intent(graph, '到货计划是什么')
 

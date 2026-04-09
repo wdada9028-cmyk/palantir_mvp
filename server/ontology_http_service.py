@@ -32,6 +32,10 @@ async def iter_qa_events(result: InstanceQAResult) -> AsyncIterator[str]:
         'validation_error': result.question_validation_error,
     })
 
+    schema_trace_events, step = _build_schema_trace_events(result, session_id=session_id, start_step=step)
+    for event_text in schema_trace_events:
+        yield event_text
+
     step += 1
     yield sse_event('fact_query_planned', {
         'session_id': session_id,
@@ -129,6 +133,53 @@ def _llm_context_to_dict(result: InstanceQAResult) -> dict[str, object]:
         'style_prompt': context.style_prompt,
         'user_payload': context.user_payload,
     }
+
+
+
+def _build_schema_trace_events(result: InstanceQAResult, *, session_id: str, start_step: int) -> tuple[list[str], int]:
+    bundle = result.schema_retrieval_bundle
+    search_trace = bundle.search_trace
+    events: list[str] = []
+    step = start_step
+
+    seed_node_ids = list(search_trace.seed_node_ids or bundle.seed_node_ids)
+    if seed_node_ids:
+        step += 1
+        events.append(sse_event('trace_anchor', {
+            'session_id': session_id,
+            'step': step,
+            'message': '?????????',
+            'node_ids': seed_node_ids,
+            'edge_ids': [],
+            'snapshot_node_ids': seed_node_ids,
+            'snapshot_edge_ids': [],
+            'delay_ms': 420,
+        }))
+
+    for item in search_trace.expansion_steps:
+        step += 1
+        events.append(sse_event('trace_expand', {
+            'session_id': session_id,
+            'step': step,
+            'message': f'? {item.relation} ???????',
+            'node_ids': [item.to_node_id],
+            'edge_ids': [item.edge_id],
+            'snapshot_node_ids': list(item.snapshot_node_ids),
+            'snapshot_edge_ids': list(item.snapshot_edge_ids),
+            'delay_ms': 380,
+        }))
+
+    if seed_node_ids or search_trace.expansion_steps:
+        step += 1
+        events.append(sse_event('evidence_final', {
+            'session_id': session_id,
+            'step': step,
+            'message': '??????????????',
+            'evidence_chain': [item.to_dict() for item in bundle.evidence_chain],
+            'search_trace': bundle.search_trace.to_dict(),
+        }))
+
+    return events, step
 
 
 

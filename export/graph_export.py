@@ -142,17 +142,32 @@ def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive
     .trace-dimmed { opacity: 0.38; }
     .evidence-timeline button { width: 100%; text-align: left; }
     .qa-answer-text { min-height: 72px; line-height: 1.7; font-size: 15px; color: #f8fafc; white-space: pre-wrap; }
-    .qa-trace-report { color: #cbd5e1; }
-    .qa-trace-report-body { margin-top: 8px; line-height: 1.7; white-space: normal; color: #cbd5e1; }
-    .qa-trace-report summary { cursor: pointer; list-style: none; }
-    .qa-trace-report summary::-webkit-details-marker { display: none; }
-    .trace-summary-section { border-top: 1px solid rgba(148,163,184,0.18); padding-top: 10px; margin-top: 10px; }
-    .trace-summary-section:first-child { border-top: none; padding-top: 0; margin-top: 0; }
-    .trace-summary-list { margin: 0; padding-left: 18px; }
-    .trace-summary-list li { margin: 6px 0; }
-    .trace-summary-inline { color: #e2e8f0; }
-    .trace-summary-expanded { margin-top: 10px; border-top: 1px dashed rgba(148,163,184,0.24); padding-top: 10px; }
-    .trace-summary-expanded summary { color: #93c5fd; font-weight: 700; cursor: pointer; }
+    .qa-tabs { display: flex; gap: 8px; margin-top: 12px; }
+    .qa-tab { border: 1px solid rgba(148,163,184,0.35); background: rgba(15,23,42,0.65); color: #cbd5e1; border-radius: 10px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+    .qa-tab.active { background: linear-gradient(135deg, #2563eb, #7c3aed); color: #fff; border-color: transparent; }
+    .qa-tab-panel { margin-top: 10px; }
+    .qa-tab-panel.hidden { display: none; }
+    .qa-answer-mode { margin-top: 8px; font-size: 12px; color: #93c5fd; }
+    .qa-answer-insights { display: grid; gap: 10px; margin-top: 10px; }
+    .qa-answer-insight-body { font-size: 12px; color: #cbd5e1; line-height: 1.7; }
+    .qa-answer-insight-list { margin: 0; padding-left: 18px; }
+    .qa-answer-insight-list li { margin: 6px 0; }
+    .qa-answer-insight-empty { color: #94a3b8; }
+    .qa-evidence-cards { display: grid; gap: 10px; }
+    .evidence-card { border: 1px solid rgba(148,163,184,0.26); background: rgba(30,41,59,0.72); border-radius: 12px; padding: 10px; }
+    .evidence-card-tag { display: inline-flex; align-items: center; margin-bottom: 8px; padding: 2px 8px; border-radius: 999px; background: rgba(59,130,246,0.16); color: #93c5fd; font-size: 11px; font-weight: 700; }
+    .evidence-card-title { font-size: 12px; font-weight: 700; color: #e2e8f0; margin-bottom: 4px; }
+    .evidence-card-entity { font-size: 11px; color: #94a3b8; margin-bottom: 8px; }
+    .evidence-card-attrs { display: grid; gap: 6px; font-size: 12px; color: #cbd5e1; line-height: 1.5; }
+    .evidence-card-overflow { border-style: dashed; }
+    .qa-focus-list { display: grid; gap: 8px; }
+    .qa-focus-target { text-align: left; border: 1px solid rgba(148,163,184,0.32); background: rgba(30,41,59,0.82); color: #e2e8f0; border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+    .qa-focus-playback { margin-top: 10px; }
+    .qa-playback-controls { display: flex; gap: 8px; margin-bottom: 10px; }
+    .qa-playback-button { flex: 1; border: 1px solid rgba(148,163,184,0.3); background: rgba(15,23,42,0.68); color: #e2e8f0; border-radius: 10px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+    .qa-playback-button[disabled] { opacity: 0.45; cursor: not-allowed; }
+    .qa-playback-current { margin-bottom: 10px; font-size: 12px; color: #cbd5e1; line-height: 1.6; }
+    .qa-playback-step.active { border-color: rgba(96,165,250,0.9) !important; box-shadow: 0 0 0 1px rgba(96,165,250,0.25); }
   </style>
 </head>
 <body>
@@ -178,10 +193,42 @@ def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive
         <div class="qa-subtitle">仅基于当前本体系统回答</div>
         <textarea id="qa-question" class="qa-input" placeholder="请输入你想询问的本体问题"></textarea>
         <div class="qa-actions"><button id="qa-submit" class="qa-submit">提问</button></div>
-        <div id="qa-status" class="qa-card hidden"><div class="qa-card-title">\u72b6\u6001</div><div>\u7b49\u5f85\u63d0\u95ee</div></div>
-        <div id="qa-answer" class="qa-card hidden"><div class="qa-card-title">\u7b54\u6848\u6458\u8981</div><div id="qa-answer-text" class="qa-answer-text">\u7b49\u5f85\u56de\u7b54</div></div>
-        <details id="qa-trace-report" class="qa-card hidden qa-trace-report"><summary class="qa-card-title">\u903b\u8f91\u6eaf\u6e90</summary><div id="qa-trace-report-body" class="qa-trace-report-body">\u7b49\u5f85\u6eaf\u6e90</div></details>
-        <div id="evidence-timeline" class="qa-card hidden evidence-timeline"><div class="qa-card-title">\u8bc1\u636e\u65f6\u95f4\u7ebf</div><div>\u7b49\u5f85\u68c0\u7d22</div></div>
+        <div id="qa-status" class="qa-card hidden"><div class="qa-card-title">状态</div><div>等待提问</div></div>
+
+        <div class="qa-tabs" id="qa-tabs">
+          <button id="qa-tab-answer" class="qa-tab active" type="button">答案摘要</button>
+          <button id="qa-tab-evidence" class="qa-tab" type="button">关键证据</button>
+          <button id="qa-tab-focus" class="qa-tab" type="button">图谱定位</button>
+        </div>
+
+        <div id="qa-panel-answer" class="qa-tab-panel">
+          <div id="qa-answer" class="qa-card hidden"><div class="qa-card-title">答案摘要</div><div id="qa-answer-text" class="qa-answer-text">等待回答</div><div id="qa-answer-mode" class="qa-answer-mode hidden"></div></div>
+          <div id="qa-answer-insights" class="qa-answer-insights">
+            <div class="qa-card">
+              <div class="qa-card-title">结论依据</div>
+              <div id="qa-answer-basis" class="qa-answer-insight-body"><div class="muted">等待回答</div></div>
+            </div>
+            <div class="qa-card">
+              <div class="qa-card-title">数据缺口</div>
+              <div id="qa-answer-gaps" class="qa-answer-insight-body"><div class="muted">等待检索</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="qa-panel-evidence" class="qa-tab-panel hidden">
+          <div class="qa-card">
+            <div class="qa-card-title">关键证据</div>
+            <div id="qa-evidence-cards" class="qa-evidence-cards"><div class="muted">等待证据</div></div>
+          </div>
+        </div>
+
+        <div id="qa-panel-focus" class="qa-tab-panel hidden">
+          <div class="qa-card">
+            <div class="qa-card-title">图谱定位</div>
+            <div id="qa-focus-list" class="qa-focus-list"><div class="muted">等待可定位对象</div></div>
+          </div>
+          <div id="qa-focus-playback" class="qa-card hidden evidence-timeline qa-focus-playback"><div class="qa-card-title">检索回放</div><div class="qa-playback-controls"><button id="qa-playback-prev" class="qa-playback-button" type="button">上一步</button><button id="qa-playback-replay" class="qa-playback-button" type="button">重播</button><button id="qa-playback-next" class="qa-playback-button" type="button">下一步</button></div><div id="qa-playback-current" class="qa-playback-current">等待检索</div><div id="qa-focus-playback-body"><div class="muted">等待检索</div></div></div>
+        </div>
       </section>
   </div>
   <script>__CYTOSCAPE_BUNDLE__
@@ -202,29 +249,37 @@ window.cytoscape = window.cytoscape || cytoscape;
     const qaQuestionInput = document.getElementById('qa-question');
     const qaSubmitButton = document.getElementById('qa-submit');
     const qaStatusCard = document.getElementById('qa-status');
+    const qaTabAnswer = document.getElementById('qa-tab-answer');
+    const qaTabEvidence = document.getElementById('qa-tab-evidence');
+    const qaTabFocus = document.getElementById('qa-tab-focus');
+    const qaPanelAnswer = document.getElementById('qa-panel-answer');
+    const qaPanelEvidence = document.getElementById('qa-panel-evidence');
+    const qaPanelFocus = document.getElementById('qa-panel-focus');
     const qaAnswerCard = document.getElementById('qa-answer');
     const qaAnswerText = document.getElementById('qa-answer-text');
-    const qaTraceReportCard = document.getElementById('qa-trace-report');
-    const qaTraceReportBody = document.getElementById('qa-trace-report-body');
-    const qaEvidenceTimelineCard = document.getElementById('evidence-timeline');
+    const qaAnswerMode = document.getElementById('qa-answer-mode');
+    const qaAnswerInsights = document.getElementById('qa-answer-insights');
+    const qaAnswerBasis = document.getElementById('qa-answer-basis');
+    const qaAnswerGaps = document.getElementById('qa-answer-gaps');
+    const qaEvidenceCards = document.getElementById('qa-evidence-cards');
+    const qaFocusList = document.getElementById('qa-focus-list');
+    const qaFocusPlaybackCard = document.getElementById('qa-focus-playback');
+    const qaPlaybackPrev = document.getElementById('qa-playback-prev');
+    const qaPlaybackReplay = document.getElementById('qa-playback-replay');
+    const qaPlaybackNext = document.getElementById('qa-playback-next');
+    const qaPlaybackCurrent = document.getElementById('qa-playback-current');
     const qaStatusBody = qaStatusCard.querySelector('div:last-child');
-    const qaEvidenceTimelineBody = qaEvidenceTimelineCard.querySelector('div:last-child');
+    const qaFocusPlaybackBody = document.getElementById('qa-focus-playback-body');
     const defaultPanelHtml = __DEFAULT_PANEL_JSON__;
-    const TRACE_SUMMARY_TITLES = {
-      question_understanding: '\u95ee\u9898\u7406\u89e3',
-      key_evidence: '\u5173\u952e\u8bc1\u636e',
-      data_gaps: '\u6570\u636e\u7f3a\u53e3',
-      reasoning_basis: '\u7ed3\u8bba\u4f9d\u636e',
-      detailed_evidence: '\u8be6\u7ec6\u8bc1\u636e\u5bf9\u8c61',
-      key_paths: '\u5173\u952e\u8def\u5f84',
-      miss_explanations: '\u672a\u547d\u4e2d\u8bf4\u660e',
-      detailed_reasoning_basis: '\u8be6\u7ec6\u7ed3\u8bba\u4f9d\u636e',
-    };
     let qaEventSource = null;
     let persistedEvidenceChain = [];
     let persistedEvidenceMap = new Map();
     let evidenceSnapshots = new Map();
     let currentTraceSummary = null;
+    let currentQuestionDsl = null;
+    let currentEvidenceBundle = null;
+    let currentFocusTargets = [];
+    let currentPlaybackStepIndex = -1;
     let playbackController = null;
     let activeDetailNode = null;
     let detailCardFrame = null;
@@ -412,149 +467,200 @@ window.cytoscape = window.cytoscape || cytoscape;
       qaStatusBody.textContent = message || '\\u7b49\\u5f85\\u63d0\\u95ee';
     }
 
+    function setQaActiveTab(tab) {
+      const isAnswer = tab == 'answer';
+      const isEvidence = tab == 'evidence';
+      const isFocus = tab == 'focus';
+      qaTabAnswer.classList.toggle('active', isAnswer);
+      qaTabEvidence.classList.toggle('active', isEvidence);
+      qaTabFocus.classList.toggle('active', isFocus);
+      qaPanelAnswer.classList.toggle('hidden', !isAnswer);
+      qaPanelEvidence.classList.toggle('hidden', !isEvidence);
+      qaPanelFocus.classList.toggle('hidden', !isFocus);
+    }
+
+    function clearQaAnswerTabState() {
+      qaAnswerMode.classList.add('hidden');
+      qaAnswerMode.textContent = '';
+    }
+
+    function setQaAnswerTabState(used_fallback) {
+      qaAnswerMode.classList.remove('hidden');
+      qaAnswerMode.textContent = used_fallback ? '基础回答' : 'AI总结';
+    }
+
     function setQaAnswer(message) {
       qaAnswerCard.classList.remove('hidden');
       qaAnswerText.innerHTML = escapeHtml(message || '');
     }
 
-    function setQaTraceSummary(traceSummary) {
-      if (!traceSummary || typeof traceSummary !== 'object') {
-        qaTraceReportCard.classList.add('hidden');
-        qaTraceReportCard.open = false;
-        qaTraceReportBody.innerHTML = '\u7b49\u5f85\u6eaf\u6e90';
-        return;
-      }
-      qaTraceReportCard.classList.remove('hidden');
-      qaTraceReportCard.open = true;
-      qaTraceReportBody.innerHTML = renderTraceSummaryCard(traceSummary);
+    function resetQaSummaryPanels() {
+      if (qaAnswerBasis) qaAnswerBasis.innerHTML = '<div class="muted">等待回答</div>';
+      if (qaAnswerGaps) qaAnswerGaps.innerHTML = '<div class="muted">等待检索</div>';
+      if (qaEvidenceCards) qaEvidenceCards.innerHTML = '<div class="muted">等待证据</div>';
+      if (qaFocusList) qaFocusList.innerHTML = '<div class="muted">等待可定位对象</div>';
     }
 
-    function renderTraceSummaryCard(traceSummary) {
-      const compactKeys = ['question_understanding', 'key_evidence', 'data_gaps', 'reasoning_basis'];
-      const expandedKeys = ['detailed_evidence', 'key_paths', 'miss_explanations', 'detailed_reasoning_basis'];
-      const compactHtml = compactKeys.map(key => renderTraceSummarySection(TRACE_SUMMARY_TITLES[key], traceSummary.compact && traceSummary.compact[key], key)).join('');
-      const expandedHtml = expandedKeys.map(key => renderTraceSummarySection(TRACE_SUMMARY_TITLES[key], traceSummary.expanded && traceSummary.expanded[key], key)).join('');
-      const expandedBlock = expandedHtml
-        ? `<details class="trace-summary-expanded"><summary>\u5c55\u5f00\u8be6\u60c5</summary>${expandedHtml}</details>`
-        : '';
-      return compactHtml || expandedBlock ? `${compactHtml}${expandedBlock}` : '<div class="muted">\u6682\u65e0\u6eaf\u6e90\u6458\u8981</div>';
-    }
-
-    function renderTraceSummarySection(title, value, sectionKey) {
-      const body = formatTraceSummarySection(sectionKey, value);
-      if (!body) return '';
-      return `<div class="trace-summary-section"><div class="section-title">${escapeHtml(title)}</div>${body}</div>`;
-    }
-
-    function formatTraceSummarySection(sectionKey, value) {
-      if (!value || (Array.isArray(value) && !value.length)) {
-        return '<div class="muted">\u6682\u65e0</div>';
-      }
-      if (sectionKey === 'question_understanding') return formatQuestionUnderstanding(value);
-      if (sectionKey === 'key_evidence') return formatKeyEvidence(value);
-      if (sectionKey === 'data_gaps') return formatSimpleTraceList(value, 'message');
-      if (sectionKey === 'reasoning_basis') return formatStringList(value);
-      if (sectionKey === 'detailed_evidence') return formatDetailedEvidence(value);
-      if (sectionKey === 'key_paths') return formatSimpleTraceList(value, 'path_summary');
-      if (sectionKey === 'miss_explanations') return formatMissExplanations(value);
-      if (sectionKey === 'detailed_reasoning_basis') return formatReasoningPairs(value);
-      return formatGenericTraceValue(value);
-    }
-
-    function formatQuestionUnderstanding(value) {
-      if (!value || typeof value !== 'object') return '';
-      const anchor = value.anchor && typeof value.anchor === 'object' ? value.anchor : {};
-      const anchorText = anchor.entity
-        ? `${anchor.entity}${anchor.id ? ` (${anchor.id})` : ''}`
-        : '';
-      return formatTraceKeyValueRows([
-        ['\u95ee\u9898\u7c7b\u578b', value.question_type],
-        ['\u951a\u70b9\u5bf9\u8c61', anchorText],
-        ['\u4e8b\u4ef6', value.scenario],
-        ['\u76ee\u6807', value.goal],
-      ]);
-    }
-
-    function formatKeyEvidence(value) {
-      const directHits = value && typeof value === 'object' && value.direct_hits && typeof value.direct_hits === 'object'
-        ? value.direct_hits
+    function renderAnswerInsights(traceSummary) {
+      const compact = traceSummary && traceSummary.compact && typeof traceSummary.compact === 'object'
+        ? traceSummary.compact
         : {};
-      const items = Object.entries(directHits).map(([entity, info]) => {
-        const safeInfo = info && typeof info === 'object' ? info : {};
-        const label = safeInfo.label || entity;
-        const total = Number(safeInfo.total || 0);
-        const previews = Array.isArray(safeInfo.items)
-          ? safeInfo.items.map(item => formatTraceObjectInline(item)).filter(Boolean)
-          : [];
-        const previewText = previews.length ? `\uff1b${previews.join('\uff1b')}` : '';
-        return `<li><strong>${escapeHtml(label)}</strong>\uff1a${escapeHtml(String(total))} \u4e2a${previewText}</li>`;
-      });
-      return items.length ? `<ul class="list trace-summary-list">${items.join('')}</ul>` : '<div class="muted">\u6682\u65e0\u5173\u952e\u8bc1\u636e</div>';
+      qaAnswerInsights.id = 'qa-answer-insights';
+      qaAnswerBasis.innerHTML = formatAnswerInsightList(compact.reasoning_basis, '暂无结论依据');
+      qaAnswerGaps.innerHTML = formatAnswerGapList(compact.data_gaps, '暂无明显数据缺口');
     }
 
-    function formatDetailedEvidence(value) {
-      if (!Array.isArray(value) || !value.length) return '<div class="muted">\u6682\u65e0\u8be6\u7ec6\u8bc1\u636e</div>';
-      const items = value.map(group => {
-        const safeGroup = group && typeof group === 'object' ? group : {};
-        const label = safeGroup.label || safeGroup.entity || '';
-        const instances = Array.isArray(safeGroup.instances) ? safeGroup.instances.map(item => formatTraceObjectInline(item)).filter(Boolean) : [];
-        return `<li><strong>${escapeHtml(String(label))}</strong>\uff1a${instances.length ? escapeHtml(instances.join('\uff1b')) : '\u6682\u65e0\u5b9e\u4f8b\u660e\u7ec6'}</li>`;
-      });
-      return `<ul class="list trace-summary-list">${items.join('')}</ul>`;
+    function formatAnswerInsightList(items, emptyText) {
+      if (!Array.isArray(items) || !items.length) {
+        return `<div class="qa-answer-insight-empty">${escapeHtml(emptyText)}</div>`;
+      }
+      return `<ul class="qa-answer-insight-list">${items.map(item => `<li>${escapeHtml(String(item || ''))}</li>`).join('')}</ul>`;
     }
 
-    function formatMissExplanations(value) {
-      if (!Array.isArray(value) || !value.length) return '<div class="muted">\u65e0</div>';
-      const items = value.map(item => {
-        const safeItem = item && typeof item === 'object' ? item : {};
-        const entity = safeItem.entity || '';
-        const type = safeItem.type || '';
-        const reason = safeItem.reason || '';
-        const omitted = safeItem.omitted_count ? ` (${safeItem.omitted_count})` : '';
-        return `<li><strong>${escapeHtml(String(entity))}</strong>\uff08${escapeHtml(String(type))}${escapeHtml(String(omitted))}\uff09\uff1a${escapeHtml(String(reason))}</li>`;
-      });
-      return `<ul class="list trace-summary-list">${items.join('')}</ul>`;
-    }
-
-    function formatReasoningPairs(value) {
-      if (!Array.isArray(value) || !value.length) return '<div class="muted">\u65e0</div>';
-      return `<ul class="list trace-summary-list">${value.map(item => {
-        const safeItem = item && typeof item === 'object' ? item : {};
-        return `<li><strong>${escapeHtml(String(safeItem.label || ''))}</strong>\uff1a${escapeHtml(String(safeItem.value || ''))}</li>`;
-      }).join('')}</ul>`;
-    }
-
-    function formatSimpleTraceList(value, field) {
-      if (!Array.isArray(value) || !value.length) return '<div class="muted">\u65e0</div>';
-      return `<ul class="list trace-summary-list">${value.map(item => {
+    function formatAnswerGapList(items, emptyText) {
+      if (!Array.isArray(items) || !items.length) {
+        return `<div class="qa-answer-insight-empty">${escapeHtml(emptyText)}</div>`;
+      }
+      return `<ul class="qa-answer-insight-list">${items.map(item => {
         if (item && typeof item === 'object') {
-          return `<li>${escapeHtml(String(item[field] || ''))}</li>`;
+          return `<li>${escapeHtml(String(item.message || ''))}</li>`;
         }
         return `<li>${escapeHtml(String(item || ''))}</li>`;
       }).join('')}</ul>`;
     }
 
-    function formatTraceKeyValueRows(rows) {
-      const lines = rows.map(([label, value]) => {
-        if (!value) return '';
-        return `<div class="trace-summary-inline"><strong>${escapeHtml(label)}</strong>\uff1a${escapeHtml(String(value))}</div>`;
-      }).filter(Boolean);
-      return lines.join('');
+    function formatEvidenceValue(value) {
+      if (Array.isArray(value)) return value.map(item => String(item || '')).filter(Boolean).join('\u3001');
+      if (value && typeof value === 'object') return JSON.stringify(value);
+      return String(value || '');
     }
 
-    function formatTraceObjectInline(value) {
-      if (!value || typeof value !== 'object') return '';
-      return Object.entries(value).map(([key, itemValue]) => `${key}=${itemValue}`).join('\uff0c');
+    function pickEvidenceTitle(instance) {
+      const entries = Object.entries(instance || {}).filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '');
+      const preferred = entries.find(([key]) => /(^id$|_id$|-id$)/i.test(key))
+        || entries.find(([key]) => /name/i.test(key))
+        || entries[0];
+      if (!preferred) return '实例';
+      return `${preferred[0]}=${formatEvidenceValue(preferred[1])}`;
     }
 
-    function formatGenericTraceValue(value) {
-      if (Array.isArray(value)) {
-        return formatStringList(value.map(item => item && typeof item === 'object' ? JSON.stringify(item) : item));
+    function buildEvidenceCard(entity, label, instance) {
+      const safeInstance = instance && typeof instance === 'object' ? instance : {};
+      const attrs = Object.entries(safeInstance).filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '');
+      const attrsHtml = attrs.length
+        ? attrs.map(([key, value]) => `<div><strong>${escapeHtml(key)}</strong>\uff1a${escapeHtml(formatEvidenceValue(value))}</div>`).join('')
+        : '<div class="muted">暂无实例属性</div>';
+      return `<div class="evidence-card"><div class="evidence-card-tag">${escapeHtml(label || entity || '关键证据')}</div><div class="evidence-card-title">${escapeHtml(pickEvidenceTitle(safeInstance))}</div><div class="evidence-card-entity">${escapeHtml(entity || '')}</div><div class="evidence-card-attrs">${attrsHtml}</div></div>`;
+    }
+
+    function renderEvidenceCards(traceSummary) {
+      if (!qaEvidenceCards) return;
+      const compactHits = traceSummary && traceSummary.compact && traceSummary.compact.key_evidence && traceSummary.compact.key_evidence.direct_hits
+        ? traceSummary.compact.key_evidence.direct_hits
+        : {};
+      const detailedGroups = Array.isArray(traceSummary && traceSummary.expanded && traceSummary.expanded.detailed_evidence)
+        ? traceSummary.expanded.detailed_evidence
+        : [];
+      const cards = [];
+      if (detailedGroups.length) {
+        detailedGroups.forEach(group => {
+          const safeGroup = group && typeof group === 'object' ? group : {};
+          const entity = String(safeGroup.entity || '').trim();
+          const label = safeGroup.label || entity;
+          const instances = Array.isArray(safeGroup.instances) ? safeGroup.instances : [];
+          instances.forEach(instance => cards.push(buildEvidenceCard(entity, label, instance)));
+          const total = Number(compactHits[entity] && compactHits[entity].total ? compactHits[entity].total : instances.length);
+          const overflow = Math.max(total - instances.length, 0);
+          if (overflow > 0) {
+            cards.push(`<div class="evidence-card evidence-card-overflow"><div class="evidence-card-tag">${escapeHtml(label)}</div><div class="evidence-card-title">其余 ${overflow} 条已折叠</div></div>`);
+          }
+        });
+      } else {
+        Object.entries(compactHits).forEach(([entity, payload]) => {
+          const safePayload = payload && typeof payload === 'object' ? payload : {};
+          const label = safePayload.label || entity;
+          const items = Array.isArray(safePayload.items) ? safePayload.items : [];
+          if (!items.length) {
+            cards.push(`<div class="evidence-card"><div class="evidence-card-tag">${escapeHtml(label)}</div><div class="evidence-card-title">命中 ${Number(safePayload.total || 0)} 个</div><div class="evidence-card-entity">${escapeHtml(entity)}</div><div class="evidence-card-attrs"><div class="muted">暂无实例预览</div></div></div>`);
+            return;
+          }
+          items.forEach(item => cards.push(buildEvidenceCard(entity, label, item)));
+        });
       }
-      if (value && typeof value === 'object') {
-        return formatStringList(Object.entries(value).map(([key, itemValue]) => `${key}: ${itemValue}`));
+      qaEvidenceCards.innerHTML = cards.length
+        ? cards.join('')
+        : '<div class="muted">暂无关键证据</div>';
+    }
+
+    function renderFocusTargets(traceSummary) {
+      if (!qaFocusList) return;
+      const targets = [];
+      const seen = new Set();
+      const keyPaths = Array.isArray(traceSummary && traceSummary.expanded && traceSummary.expanded.key_paths)
+        ? traceSummary.expanded.key_paths
+        : [];
+      keyPaths.forEach(item => {
+        const summary = item && typeof item === 'object' ? String(item.path_summary || '').trim() : String(item || '').trim();
+        if (!summary || seen.has(`path:${summary}`)) return;
+        const entities = [];
+        const regex = /([A-Za-z][A-Za-z0-9_]*)\\s+[^\\s,;]+/g;
+        let match;
+        while ((match = regex.exec(summary)) !== null) {
+          entities.push(match[1]);
+        }
+        targets.push({ label: summary, node_ids: findNodeIdsForEntityNames(entities), edge_ids: [] });
+        seen.add(`path:${summary}`);
+      });
+      const groups = Array.isArray(traceSummary && traceSummary.expanded && traceSummary.expanded.detailed_evidence)
+        ? traceSummary.expanded.detailed_evidence
+        : [];
+      groups.forEach(group => {
+        const safeGroup = group && typeof group === 'object' ? group : {};
+        const entity = String(safeGroup.entity || '').trim();
+        if (!entity) return;
+        const nodeIds = findNodeIdsForEntityNames([entity]);
+        const label = safeGroup.label || entity;
+        const instances = Array.isArray(safeGroup.instances) ? safeGroup.instances : [];
+        if (!instances.length && !seen.has(`entity:${entity}`)) {
+          targets.push({ label, node_ids: nodeIds, edge_ids: [] });
+          seen.add(`entity:${entity}`);
+          return;
+        }
+        instances.slice(0, 6).forEach(instance => {
+          const targetLabel = `${label}\uff1a${pickEvidenceTitle(instance)}`;
+          if (seen.has(`instance:${targetLabel}`)) return;
+          targets.push({ label: targetLabel, node_ids: nodeIds, edge_ids: [] });
+          seen.add(`instance:${targetLabel}`);
+        });
+      });
+      currentFocusTargets = targets;
+      qaFocusList.innerHTML = targets.length
+        ? targets.map((target, index) => `<button type="button" class="qa-focus-target" data-focus-index="${index}">${escapeHtml(target.label)}</button>`).join('')
+        : '<div class="muted">暂无可定位对象</div>';
+      qaFocusList.querySelectorAll('[data-focus-index]').forEach(button => {
+        button.addEventListener('click', () => {
+          const index = Number(button.dataset.focusIndex);
+          focusTraceTarget(currentFocusTargets[index]);
+        });
+      });
+    }
+
+    function focusTraceTarget(target) {
+      if (!target) return;
+      if (!Array.isArray(target.node_ids) || !target.node_ids.length) {
+        setQaStatus(`暂无可对应的图谱节点：${target.label || '目标'}`);
+        setQaActiveTab('focus');
+        return;
       }
-      return `<div class="trace-summary-inline">${escapeHtml(String(value || ''))}</div>`;
+      replayFromSnapshot({ node_ids: target.node_ids, edge_ids: target.edge_ids || [] }, { fit: true, duration: 260, pulseDuration: 380 });
+      setQaStatus(`已定位：${target.label || '目标'}`);
+      setQaActiveTab('focus');
+    }
+
+    function setQaTraceSummary(traceSummary) {
+      renderAnswerInsights(traceSummary);
+      renderEvidenceCards(traceSummary);
+      renderFocusTargets(traceSummary);
     }
 
     function clearTraceClasses() {
@@ -615,13 +721,21 @@ window.cytoscape = window.cytoscape || cytoscape;
       setQaStatus('\u7b49\u5f85\u63d0\u95ee');
       qaAnswerCard.classList.add('hidden');
       qaAnswerText.textContent = '\u7b49\u5f85\u56de\u7b54';
+      clearQaAnswerTabState();
+      setQaActiveTab('answer');
+      resetQaSummaryPanels();
+      currentFocusTargets = [];
       currentTraceSummary = null;
-      setQaTraceSummary(null);
-      qaEvidenceTimelineCard.classList.add('hidden');
-      qaEvidenceTimelineBody.innerHTML = '\u7b49\u5f85\u68c0\u7d22';
+      currentQuestionDsl = null;
+      currentEvidenceBundle = null;
+      currentPlaybackStepIndex = -1;
+      qaFocusPlaybackCard.classList.add('hidden');
+      qaPlaybackCurrent.textContent = '\u7b49\u5f85\u5b9e\u4f53\u68c0\u7d22';
+      qaFocusPlaybackBody.innerHTML = '<div class="muted">\u7b49\u5f85\u5b9e\u4f53\u68c0\u7d22</div>';
       persistedEvidenceChain = [];
       persistedEvidenceMap = new Map();
       evidenceSnapshots = new Map();
+      updateFocusPlaybackControls();
       clearTraceClasses();
       setFilteringState(false);
       clearPlaybackTimers(playbackController);
@@ -716,31 +830,80 @@ window.cytoscape = window.cytoscape || cytoscape;
       return snapshots;
     }
 
-    function renderEvidenceTimeline(chain) {
-      qaEvidenceTimelineCard.classList.remove('hidden');
-      if (!Array.isArray(chain) || chain.length === 0) {
-        qaEvidenceTimelineBody.innerHTML = '<div class="muted">\u6682\u65e0\u8bc1\u636e</div>';
+    function hasSnapshotData(snapshot) {
+      return Boolean(snapshot) && ((Array.isArray(snapshot.node_ids) && snapshot.node_ids.length > 0) || (Array.isArray(snapshot.edge_ids) && snapshot.edge_ids.length > 0));
+    }
+
+    function updateFocusPlaybackControls() {
+      const hasSteps = persistedEvidenceChain.length > 0;
+      qaPlaybackPrev.disabled = !hasSteps || currentPlaybackStepIndex <= 0;
+      qaPlaybackReplay.disabled = !hasSteps || currentPlaybackStepIndex < 0;
+      qaPlaybackNext.disabled = !hasSteps || currentPlaybackStepIndex >= persistedEvidenceChain.length - 1;
+      if (!hasSteps || currentPlaybackStepIndex < 0 || currentPlaybackStepIndex >= persistedEvidenceChain.length) {
+        qaPlaybackCurrent.textContent = '等待检索';
         return;
       }
-      qaEvidenceTimelineBody.innerHTML = chain.map(item => {
+      const currentItem = persistedEvidenceChain[currentPlaybackStepIndex] || {};
+      const stepLabel = currentItem.label || currentItem.kind || '检索步骤';
+      const stepMessage = currentItem.message || '';
+      qaPlaybackCurrent.textContent = `当前步骤 ${currentPlaybackStepIndex + 1}/${persistedEvidenceChain.length}：${stepLabel}${stepMessage ? ` — ${stepMessage}` : ''}`;
+    }
+
+    function setFocusPlaybackIndex(index, options = {}) {
+      if (!persistedEvidenceChain.length) {
+        currentPlaybackStepIndex = -1;
+        updateFocusPlaybackControls();
+        return;
+      }
+      const safeIndex = Math.max(0, Math.min(index, persistedEvidenceChain.length - 1));
+      currentPlaybackStepIndex = safeIndex;
+      updateFocusPlaybackControls();
+      qaFocusPlaybackBody.querySelectorAll('[data-playback-index]').forEach(button => {
+        button.classList.toggle('active', Number(button.dataset.playbackIndex) === safeIndex);
+      });
+      const item = persistedEvidenceChain[safeIndex] || {};
+      const snapshot = evidenceSnapshots.get(item.evidence_id) || { node_ids: [], edge_ids: [] };
+      if (options.replay !== false && hasSnapshotData(snapshot)) {
+        replayFromSnapshot(snapshot, { fit: true, duration: 280, pulseDuration: 420 });
+      }
+      if (options.setStatus !== false) {
+        setQaStatus(`检索步骤 ${safeIndex + 1}/${persistedEvidenceChain.length}：${item.label || item.kind || '证据'}`);
+      }
+      if (options.openTab) {
+        setQaActiveTab('focus');
+      }
+    }
+
+    function renderEvidenceTimeline(chain) {
+      qaFocusPlaybackCard.classList.remove('hidden');
+      if (!Array.isArray(chain) || chain.length === 0) {
+        currentPlaybackStepIndex = -1;
+        qaFocusPlaybackBody.innerHTML = '<div class="muted">暂无检索步骤</div>';
+        updateFocusPlaybackControls();
+        return;
+      }
+      qaFocusPlaybackBody.innerHTML = chain.map((item, index) => {
         const reasons = Array.isArray(item.why_matched) && item.why_matched.length
           ? `<div style="margin-top:6px;color:#93c5fd;font-size:12px;">${item.why_matched.map(reason => escapeHtml(reason)).join('<br />')}</div>`
           : '';
+        const activeClass = index === currentPlaybackStepIndex ? ' active' : '';
         return `
-          <button type="button" data-evidence-id="${escapeHtml(item.evidence_id)}" style="display:block;width:100%;text-align:left;background:rgba(30,41,59,0.9);border:1px solid rgba(148,163,184,0.28);border-radius:12px;color:#e2e8f0;padding:10px 12px;margin:0 0 10px 0;cursor:pointer;">
-            <div style="font-weight:700;color:#bfdbfe;">[${escapeHtml(item.evidence_id)}] ${escapeHtml(item.label || item.kind || '\\u8bc1\\u636e')}</div>
+          <button type="button" data-evidence-id="${escapeHtml(item.evidence_id)}" data-playback-index="${index}" class="qa-playback-step${activeClass}" style="display:block;width:100%;text-align:left;background:rgba(30,41,59,0.9);border:1px solid rgba(148,163,184,0.28);border-radius:12px;color:#e2e8f0;padding:10px 12px;margin:0 0 10px 0;cursor:pointer;">
+            <div style="font-weight:700;color:#bfdbfe;">[${index + 1}] ${escapeHtml(item.label || item.kind || '证据')}</div>
             <div style="margin-top:4px;line-height:1.5;">${escapeHtml(item.message || '')}</div>
             ${reasons}
           </button>
         `;
       }).join('');
-      qaEvidenceTimelineBody.querySelectorAll('[data-evidence-id]').forEach(button => {
+      qaFocusPlaybackBody.querySelectorAll('[data-playback-index]').forEach(button => {
         button.addEventListener('click', () => {
-          const snapshot = evidenceSnapshots.get(button.dataset.evidenceId) || { node_ids: [], edge_ids: [] };
-          replayFromSnapshot(snapshot, { fit: true, duration: 280, pulseDuration: 420 });
-          setQaStatus(`\\u56de\\u653e\\u8bc1\\u636e ${button.dataset.evidenceId}`);
+          setFocusPlaybackIndex(Number(button.dataset.playbackIndex), { replay: true, openTab: true });
         });
       });
+      if (currentPlaybackStepIndex >= chain.length) {
+        currentPlaybackStepIndex = chain.length - 1;
+      }
+      updateFocusPlaybackControls();
     }
 
     function upsertEvidenceItem(evidence, snapshot) {
@@ -751,6 +914,10 @@ window.cytoscape = window.cytoscape || cytoscape;
       }
       persistedEvidenceChain = Array.from(persistedEvidenceMap.values());
       renderEvidenceTimeline(persistedEvidenceChain);
+      const playbackIndex = persistedEvidenceChain.findIndex(item => item.evidence_id === evidence.evidence_id);
+      if (playbackIndex >= 0 && hasSnapshotData(evidenceSnapshots.get(evidence.evidence_id))) {
+        setFocusPlaybackIndex(playbackIndex, { replay: true, setStatus: false });
+      }
     }
 
     function appendEvidenceIncrementally(evidence) {
@@ -762,6 +929,9 @@ window.cytoscape = window.cytoscape || cytoscape;
       persistedEvidenceMap = new Map(persistedEvidenceChain.map(item => [item.evidence_id, item]));
       evidenceSnapshots = buildEvidenceSnapshots(persistedEvidenceChain, result.search_trace || {});
       renderEvidenceTimeline(persistedEvidenceChain);
+      if (persistedEvidenceChain.length && currentPlaybackStepIndex < 0) {
+        setFocusPlaybackIndex(persistedEvidenceChain.length - 1, { replay: false, setStatus: false });
+      }
     }
 
     function findNodeIdsForEntityNames(entityNames) {
@@ -819,6 +989,172 @@ window.cytoscape = window.cytoscape || cytoscape;
       };
     }
 
+    function collectSchemaRetrievalEntities(questionDsl, evidenceBundle) {
+      const result = [];
+      const seen = new Set();
+      function pushEntity(value) {
+        const text = String(value || '').trim();
+        if (!text || seen.has(text)) return;
+        seen.add(text);
+        result.push(text);
+      }
+      const anchor = questionDsl && typeof questionDsl === 'object' && questionDsl.anchor && typeof questionDsl.anchor === 'object'
+        ? questionDsl.anchor
+        : {};
+      pushEntity(anchor.entity);
+      const understanding = evidenceBundle && typeof evidenceBundle === 'object' && evidenceBundle.understanding && typeof evidenceBundle.understanding === 'object'
+        ? evidenceBundle.understanding
+        : {};
+      const understandingAnchor = understanding.anchor && typeof understanding.anchor === 'object' ? understanding.anchor : {};
+      pushEntity(understandingAnchor.entity);
+      const groups = Array.isArray(evidenceBundle && evidenceBundle.positive_evidence) ? evidenceBundle.positive_evidence : [];
+      groups.forEach(group => pushEntity(group && group.entity));
+      const emptyEntities = Array.isArray(evidenceBundle && evidenceBundle.empty_entities) ? evidenceBundle.empty_entities : [];
+      emptyEntities.forEach(item => pushEntity(item && item.entity));
+      const unrelatedEntities = Array.isArray(evidenceBundle && evidenceBundle.unrelated_entities) ? evidenceBundle.unrelated_entities : [];
+      unrelatedEntities.forEach(item => pushEntity(item && item.entity));
+      const omittedEntities = Array.isArray(evidenceBundle && evidenceBundle.omitted_entities) ? evidenceBundle.omitted_entities : [];
+      omittedEntities.forEach(item => pushEntity(item && item.entity));
+      const edges = Array.isArray(evidenceBundle && evidenceBundle.edges) ? evidenceBundle.edges : [];
+      edges.forEach(edge => {
+        pushEntity(edge && edge.source_entity);
+        pushEntity(edge && edge.target_entity);
+      });
+      return result;
+    }
+
+    function buildSchemaPathTriples(pathText) {
+      const text = String(pathText || '').trim();
+      if (!text) return [];
+      const nodes = [];
+      const nodePattern = /([A-Za-z][A-Za-z0-9_]*)\([^)]*\)/g;
+      let nodeMatch;
+      while ((nodeMatch = nodePattern.exec(text)) !== null) {
+        nodes.push({ entity: nodeMatch[1], index: nodeMatch.index, raw: nodeMatch[0] });
+      }
+      if (nodes.length < 2) return [];
+      const triples = [];
+      for (let index = 0; index < nodes.length - 1; index += 1) {
+        const current = nodes[index];
+        const next = nodes[index + 1];
+        const between = text.slice(current.index + current.raw.length, next.index).trim();
+        let relationMatch = between.match(/--([^<>-]+)-->/);
+        if (relationMatch) {
+          triples.push({ source: current.entity, relation: String(relationMatch[1] || '').trim(), target: next.entity, reason: text });
+          continue;
+        }
+        relationMatch = between.match(/<--([^<>-]+)--/);
+        if (relationMatch) {
+          triples.push({ source: next.entity, relation: String(relationMatch[1] || '').trim(), target: current.entity, reason: text });
+        }
+      }
+      return triples;
+    }
+
+    function dedupeSchemaTriples(triples) {
+      const result = [];
+      const seen = new Set();
+      (triples || []).forEach(item => {
+        const source = String(item && item.source || '').trim();
+        const relation = String(item && item.relation || '').trim();
+        const target = String(item && item.target || '').trim();
+        if (!source || !relation || !target) return;
+        const key = `${source}|${relation}|${target}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        result.push({ source, relation, target, reason: String(item && item.reason || '').trim() });
+      });
+      return result;
+    }
+
+    function buildSchemaRetrievalEdgeTriples(evidenceBundle) {
+      const pathTriples = [];
+      const paths = Array.isArray(evidenceBundle && evidenceBundle.paths) ? evidenceBundle.paths : [];
+      paths.forEach(path => {
+        buildSchemaPathTriples(path).forEach(item => pathTriples.push(item));
+      });
+      if (pathTriples.length) return dedupeSchemaTriples(pathTriples);
+      const edges = Array.isArray(evidenceBundle && evidenceBundle.edges) ? evidenceBundle.edges : [];
+      return dedupeSchemaTriples(edges.map(edge => ({
+        source: edge && edge.source_entity,
+        relation: edge && edge.relation,
+        target: edge && edge.target_entity,
+        reason: '',
+      })));
+    }
+
+    function buildSchemaRetrievalPlaybackSteps(questionDsl, evidenceBundle) {
+      const steps = [];
+      const anchor = questionDsl && typeof questionDsl === 'object' && questionDsl.anchor && typeof questionDsl.anchor === 'object'
+        ? questionDsl.anchor
+        : {};
+      const anchorEntity = String(anchor.entity || '').trim();
+      const cumulativeEntities = [];
+      const seenEntities = new Set();
+      const cumulativeTriples = [];
+      function pushEntity(value) {
+        const text = String(value || '').trim();
+        if (!text || seenEntities.has(text)) return;
+        seenEntities.add(text);
+        cumulativeEntities.push(text);
+      }
+      if (anchorEntity) {
+        pushEntity(anchorEntity);
+        steps.push({
+          evidence_id: 'schema:anchor',
+          kind: 'schema_retrieval',
+          label: '\u8bc6\u522b\u951a\u70b9\u5b9e\u4f53',
+          message: `\u4ece ${anchorEntity} \u5f00\u59cb\u68c0\u7d22\u76f8\u5173\u672c\u4f53\u5b9e\u4f53`,
+          node_ids: findNodeIdsForEntityNames([anchorEntity]),
+          edge_ids: [],
+          why_matched: [],
+        });
+      }
+      buildSchemaRetrievalEdgeTriples(evidenceBundle).forEach((triple, index) => {
+        pushEntity(triple.source);
+        pushEntity(triple.target);
+        cumulativeTriples.push({ source: triple.source, relation: triple.relation, target: triple.target });
+        const whyMatched = triple.reason ? [triple.reason] : [];
+        steps.push({
+          evidence_id: `schema:expand:${index + 1}`,
+          kind: 'schema_retrieval',
+          label: `\u6269\u5c55\u5230 ${triple.target}`,
+          message: `${triple.source} \u901a\u8fc7 ${triple.relation} \u5173\u8054\u5230 ${triple.target}`,
+          node_ids: findNodeIdsForEntityNames(cumulativeEntities),
+          edge_ids: findEdgeIdsForRelationTriples(cumulativeTriples),
+          why_matched: whyMatched,
+        });
+      });
+      const finalEntities = collectSchemaRetrievalEntities(questionDsl, evidenceBundle);
+      const finalTriples = buildSchemaRetrievalEdgeTriples(evidenceBundle).map(item => ({ source: item.source, relation: item.relation, target: item.target }));
+      const finalNodeIds = findNodeIdsForEntityNames(finalEntities);
+      const finalEdgeIds = findEdgeIdsForRelationTriples(finalTriples);
+      if (finalNodeIds.length || finalEdgeIds.length) {
+        steps.push({
+          evidence_id: 'schema:final',
+          kind: 'schema_retrieval',
+          label: '\u6700\u7ec8\u5b9a\u4f4d\u5b50\u56fe',
+          message: finalEntities.length ? `\u6700\u7ec8\u5b9a\u4f4d\u5230 ${finalEntities.join('\u3001')}` : '\u6700\u7ec8\u5b9a\u4f4d\u5230\u76f8\u5173\u672c\u4f53\u5b50\u56fe',
+          node_ids: finalNodeIds,
+          edge_ids: finalEdgeIds,
+          why_matched: [],
+        });
+      }
+      return steps;
+    }
+
+    function setSchemaRetrievalPlayback(questionDsl, evidenceBundle) {
+      const steps = buildSchemaRetrievalPlaybackSteps(questionDsl, evidenceBundle);
+      persistedEvidenceChain = steps;
+      persistedEvidenceMap = new Map(steps.map(item => [item.evidence_id, item]));
+      evidenceSnapshots = new Map(steps.map(item => [item.evidence_id, normalizeSnapshot({ node_ids: item.node_ids || [], edge_ids: item.edge_ids || [] })]));
+      currentPlaybackStepIndex = -1;
+      renderEvidenceTimeline(persistedEvidenceChain);
+      if (persistedEvidenceChain.length) {
+        setFocusPlaybackIndex(0, { replay: false, setStatus: false });
+      }
+    }
+
     function handleInstanceQaStageEvent(eventType, payload) {
       const safePayload = payload && typeof payload === 'object' ? payload : {};
       if (eventType === 'trace_summary_ready') {
@@ -826,7 +1162,7 @@ window.cytoscape = window.cytoscape || cytoscape;
           ? safePayload.trace_summary
           : null;
         setQaTraceSummary(currentTraceSummary);
-        setQaStatus('\u5df2\u751f\u6210\u903b\u8f91\u6eaf\u6e90');
+        setQaStatus('\u5df2\u751f\u6210\u56de\u7b54\u6458\u8981');
         return;
       }
 
@@ -835,93 +1171,60 @@ window.cytoscape = window.cytoscape || cytoscape;
           ? `\u5df2\u89e3\u6790\u95ee\u9898\uff1a${safePayload.normalized_query}`
           : '\u5df2\u5b8c\u6210\u95ee\u9898\u89e3\u6790';
         setQaStatus(message);
-        upsertEvidenceItem({
-          evidence_id: 'stage:question_parsed',
-          label: '\u95ee\u9898\u89e3\u6790',
-          kind: 'stage',
-          message,
-          why_matched: [],
-        }, { node_ids: [], edge_ids: [] });
         return;
       }
 
       if (eventType === 'question_dsl') {
-        const questionDsl = safePayload.question_dsl && typeof safePayload.question_dsl === 'object' ? safePayload.question_dsl : {};
-        const anchor = questionDsl.anchor && typeof questionDsl.anchor === 'object' ? questionDsl.anchor : {};
-        const scenario = questionDsl.scenario && typeof questionDsl.scenario === 'object' ? questionDsl.scenario : {};
-        const message = `\u5df2\u8bc6\u522b\u9526\u70b9 ${anchor.entity || '-'} / \u4e8b\u4ef6 ${scenario.event_type || '-'} / \u6a21\u5f0f ${questionDsl.mode || '-'}`;
-        setQaStatus(message);
-        upsertEvidenceItem({
-          evidence_id: 'stage:question_dsl',
-          label: '\u7ed3\u6784\u5316\u7406\u89e3',
-          kind: 'stage',
-          message,
-          why_matched: safePayload.validation_error ? [safePayload.validation_error] : [],
-        }, {
-          node_ids: findNodeIdsForEntityNames(anchor.entity ? [anchor.entity] : []),
-          edge_ids: [],
-        });
+        currentQuestionDsl = safePayload.question_dsl && typeof safePayload.question_dsl === 'object'
+          ? safePayload.question_dsl
+          : null;
+        const anchor = currentQuestionDsl && currentQuestionDsl.anchor && typeof currentQuestionDsl.anchor === 'object'
+          ? currentQuestionDsl.anchor
+          : {};
+        const scenario = currentQuestionDsl && currentQuestionDsl.scenario && typeof currentQuestionDsl.scenario === 'object'
+          ? currentQuestionDsl.scenario
+          : {};
+        setQaStatus(`\u5df2\u8bc6\u522b\u9526\u70b9 ${anchor.entity || '-'} / \u4e8b\u4ef6 ${scenario.event_type || '-'} / \u6a21\u5f0f ${currentQuestionDsl && currentQuestionDsl.mode || '-'}`);
+        if ((!playbackController || !playbackController.traceProtocolSeen) && currentEvidenceBundle) {
+          setSchemaRetrievalPlayback(currentQuestionDsl, currentEvidenceBundle);
+        }
         return;
       }
 
       if (eventType === 'fact_query_planned') {
         const factQueries = Array.isArray(safePayload.fact_queries) ? safePayload.fact_queries : [];
-        const message = `\u5df2\u751f\u6210 ${factQueries.length} \u6761\u5b9e\u4f8b\u67e5\u8be2\u8ba1\u5212`;
-        setQaStatus(message);
-        upsertEvidenceItem({
-          evidence_id: 'stage:fact_query_planned',
-          label: '\u67e5\u8be2\u8ba1\u5212',
-          kind: 'stage',
-          message,
-          why_matched: [],
-        }, { node_ids: [], edge_ids: [] });
+        setQaStatus(`\u5df2\u751f\u6210 ${factQueries.length} \u6761\u5b9e\u4f8b\u67e5\u8be2\u8ba1\u5212`);
         return;
       }
 
       if (eventType === 'typedb_query') {
-        const message = '\u6b63\u5728\u67e5\u8be2\u5b9e\u4f8b\u6570\u636e';
-        setQaStatus(message);
-        upsertEvidenceItem({
-          evidence_id: `stage:typedb_query:${safePayload.purpose || 'query'}`,
-          label: '\u5b9e\u4f8b\u67e5\u8be2',
-          kind: 'stage',
-          message,
-          why_matched: [],
-        }, { node_ids: [], edge_ids: [] });
+        setQaStatus('\u6b63\u5728\u67e5\u8be2\u5b9e\u4f8b\u6570\u636e');
         return;
       }
 
       if (eventType === 'typedb_result') {
         const factPack = safePayload.fact_pack && typeof safePayload.fact_pack === 'object' ? safePayload.fact_pack : {};
         const counts = factPack.counts && typeof factPack.counts === 'object' ? factPack.counts : {};
-        const countLines = Object.entries(counts).map(([entity, count]) => `${entity}: ${count}`);
         const total = Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
-        const message = total > 0
-          ? `\u5df2\u547d\u4e2d ${total} \u6761\u5b9e\u4f8b\u7ed3\u679c`
-          : '\u5f53\u524d\u672a\u547d\u4e2d\u5b9e\u4f8b\u7ed3\u679c';
-        setQaStatus(message);
-        upsertEvidenceItem({
-          evidence_id: 'stage:typedb_result',
-          label: '\u5b9e\u4f8b\u7ed3\u679c',
-          kind: 'stage',
-          message,
-          why_matched: countLines,
-        }, buildTypedbResultSnapshot(factPack));
+        setQaStatus(total > 0 ? `\u5df2\u547d\u4e2d ${total} \u6761\u5b9e\u4f8b\u7ed3\u679c` : '\u5f53\u524d\u672a\u547d\u4e2d\u5b9e\u4f8b\u7ed3\u679c');
+        return;
+      }
+
+      if (eventType === 'evidence_bundle_ready') {
+        currentEvidenceBundle = safePayload.evidence_bundle && typeof safePayload.evidence_bundle === 'object'
+          ? safePayload.evidence_bundle
+          : null;
+        if ((!playbackController || !playbackController.traceProtocolSeen) && currentQuestionDsl && currentEvidenceBundle) {
+          setSchemaRetrievalPlayback(currentQuestionDsl, currentEvidenceBundle);
+        }
+        setQaStatus('\u5df2\u751f\u6210\u5b9e\u4f53\u68c0\u7d22\u56de\u653e');
         return;
       }
 
       if (eventType === 'reasoning_done') {
         const reasoning = safePayload.reasoning && typeof safePayload.reasoning === 'object' ? safePayload.reasoning : {};
         const summary = reasoning.summary && typeof reasoning.summary === 'object' ? reasoning.summary : {};
-        const message = `\u5df2\u5b8c\u6210\u63a8\u7406\uff1a${summary.answer_type || 'result'}`;
-        setQaStatus(message);
-        upsertEvidenceItem({
-          evidence_id: 'stage:reasoning_done',
-          label: '\u63a8\u7406\u7ed3\u8bba',
-          kind: 'stage',
-          message,
-          why_matched: [],
-        }, buildReasoningSnapshot(reasoning));
+        setQaStatus(`\u5df2\u5b8c\u6210\u63a8\u7406\uff1a${summary.answer_type || 'result'}`);
       }
     }
 
@@ -956,7 +1259,7 @@ window.cytoscape = window.cytoscape || cytoscape;
         if (['trace_anchor', 'trace_expand', 'evidence_final'].includes(eventType)) {
           this.traceProtocolSeen = true;
         }
-        if (['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done', 'trace_summary_ready'].includes(eventType)) {
+        if (['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'evidence_bundle_ready', 'reasoning_done', 'trace_summary_ready'].includes(eventType)) {
           this.instanceQaProtocolSeen = true;
         }
         this.queue.push({ eventType, payload });
@@ -984,7 +1287,7 @@ window.cytoscape = window.cytoscape || cytoscape;
         if (payload && payload.message) {
           setQaStatus(payload.message);
         }
-        if (['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done', 'trace_summary_ready'].includes(eventType)) {
+        if (['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'evidence_bundle_ready', 'reasoning_done', 'trace_summary_ready'].includes(eventType)) {
           handleInstanceQaStageEvent(eventType, payload || {});
           return;
         }
@@ -1012,6 +1315,7 @@ window.cytoscape = window.cytoscape || cytoscape;
             persistFinalEvidence(payload || {});
           }
           setQaAnswer(payload.answer_text || payload.answer || '');
+          setQaAnswerTabState(Boolean(payload.used_fallback));
           if (payload.trace_summary) {
             currentTraceSummary = payload.trace_summary;
             setQaTraceSummary(payload.trace_summary);
@@ -1035,7 +1339,7 @@ window.cytoscape = window.cytoscape || cytoscape;
       setQaStatus('\\u6b63\\u5728\\u68c0\\u7d22\\u672c\\u4f53\\u8bc1\\u636e...');
       const eventSource = new EventSource(`/api/qa/stream?q=${encodeURIComponent(trimmedQuestion)}`);
       qaEventSource = eventSource;
-      ['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'reasoning_done', 'trace_summary_ready', 'trace_anchor', 'trace_expand', 'evidence_final', 'answer_delta', 'answer_done'].forEach(eventType => {
+      ['question_parsed', 'question_dsl', 'fact_query_planned', 'typedb_query', 'typedb_result', 'evidence_bundle_ready', 'reasoning_done', 'trace_summary_ready', 'trace_anchor', 'trace_expand', 'evidence_final', 'answer_delta', 'answer_done'].forEach(eventType => {
         eventSource.addEventListener(eventType, event => {
           const payload = JSON.parse(event.data);
           playbackController.enqueue(eventType, payload);
@@ -1255,6 +1559,13 @@ window.cytoscape = window.cytoscape || cytoscape;
       qaAnswerPanel.classList.toggle('hidden');
     });
 
+    qaTabAnswer.addEventListener('click', () => setQaActiveTab('answer'));
+    qaTabEvidence.addEventListener('click', () => setQaActiveTab('evidence'));
+    qaTabFocus.addEventListener('click', () => setQaActiveTab('focus'));
+    qaPlaybackPrev.addEventListener('click', () => setFocusPlaybackIndex(currentPlaybackStepIndex - 1, { replay: true, openTab: true }));
+    qaPlaybackReplay.addEventListener('click', () => setFocusPlaybackIndex(currentPlaybackStepIndex >= 0 ? currentPlaybackStepIndex : persistedEvidenceChain.length - 1, { replay: true, openTab: true }));
+    qaPlaybackNext.addEventListener('click', () => setFocusPlaybackIndex(currentPlaybackStepIndex + 1, { replay: true, openTab: true }));
+
     qaSubmitButton.addEventListener('click', () => {
       startQaStream(qaQuestionInput.value);
     });
@@ -1269,6 +1580,7 @@ window.cytoscape = window.cytoscape || cytoscape;
       toggleMetricNodes(false);
       applyRelationFilter();
       clearQaPresentation();
+      setQaActiveTab('answer');
       cy.fit(cy.elements(':visible'), 70);
     });
   </script>

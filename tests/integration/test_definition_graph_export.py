@@ -173,7 +173,7 @@ def test_exported_html_renders_evidence_timeline_markup_not_legacy_chain_id(tmp_
     output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
     text = output.read_text(encoding='utf-8')
 
-    assert 'id="evidence-timeline"' in text
+    assert 'id="qa-focus-playback"' in text
     assert 'id="qa-evidence-chain"' not in text
 
 
@@ -240,6 +240,119 @@ def test_exported_html_repositions_detail_card_on_viewport_changes(tmp_path: Pat
 
 
 
+
+
+def test_exported_html_contains_qa_tabs_and_defaults_to_answer_summary(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'qa-tab-answer' in text
+    assert 'qa-tab-evidence' in text
+    assert 'qa-tab-focus' in text
+    assert 'qa-panel-answer' in text
+    assert 'qa-panel-evidence' in text
+    assert 'qa-panel-focus' in text
+    assert 'setQaActiveTab' in text
+
+
+def test_exported_html_routes_answer_text_to_answer_tab_only(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'qa-answer-mode' in text
+    assert 'qa-answer-insights' in text
+    assert 'renderAnswerInsights' in text
+    assert 'setQaAnswerTabState' in text
+    assert 'used_fallback' in text
+    assert 'qa-trace-report' not in text
+
+
+def test_exported_html_renders_instance_evidence_cards_from_trace_summary(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'renderEvidenceCards' in text
+    assert 'qa-evidence-cards' in text
+    assert 'evidence-card' in text
+    assert 'evidence-card-attrs' in text
+    assert 'evidence-card-tag' in text
+
+
+def test_exported_html_contains_focus_tab_and_retrieval_playback(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'qa-focus-list' in text
+    assert 'renderFocusTargets' in text
+    assert 'focusTraceTarget' in text
+    assert 'qa-focus-playback' in text
+
+
+def test_exported_html_contains_focus_playback_controls(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'qa-playback-prev' in text
+    assert 'qa-playback-next' in text
+    assert 'qa-playback-replay' in text
+    assert 'qa-playback-current' in text
+
+
+def test_exported_html_focus_playback_uses_schema_retrieval_only(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'buildSchemaRetrievalPlaybackSteps' in text
+    assert 'evidence_bundle_ready' in text
+    assert 'typedb_result' not in text.split('function buildSchemaRetrievalPlaybackSteps', 1)[1][:1800]
+
+
+def test_exported_html_instance_qa_stage_events_do_not_auto_play_graph_focus(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'function handleInstanceQaStageEvent' in text
+    assert 'setFocusPlaybackIndex(playbackIndex' not in text.split('function handleInstanceQaStageEvent', 1)[1][:3200]
+
+
+def test_exported_html_prefers_live_trace_stream_over_synthetic_schema_playback(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'traceProtocolSeen' in text
+    assert '!playbackController || !playbackController.traceProtocolSeen' in text
+
+
+def test_exported_html_focus_playback_keeps_entity_retrieval_wording(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8').lower()
+
+    assert 'qa-focus-playback' in text
+    assert 'trace_anchor' in text
+    assert 'trace_expand' in text
+    assert 'query plan' not in text
+    assert 'stack trace' not in text
+
+
+def test_exported_html_keeps_user_trace_clean_without_debug_payload_sections(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8').lower()
+
+    assert 'typeql:' not in text
+    assert 'row_count' not in text
+    assert 'query plan' not in text
+    assert 'stack trace' not in text
+
 def test_exported_html_contains_streaming_answer_and_trace_sections(tmp_path: Path):
     graph = OntologyGraph(metadata={'title': 'ontology'})
     output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
@@ -247,21 +360,21 @@ def test_exported_html_contains_streaming_answer_and_trace_sections(tmp_path: Pa
 
     assert 'answer_delta' in text
     assert 'trace_summary_ready' in text
-    assert '\u903b\u8f91\u6eaf\u6e90' in text
     assert 'answer_text_so_far' in text
     assert 'qa-answer-text' in text
-    assert 'qa-trace-report' in text
+    assert 'qa-answer-insights' in text
+    assert 'qa-focus-playback' in text
 
 
 
-def test_exported_html_prefers_trace_summary_sections_over_debug_log_text(tmp_path: Path):
+def test_exported_html_prefers_structured_summary_sections_over_debug_log_text(tmp_path: Path):
     graph = OntologyGraph(metadata={'title': 'Ontology'})
     output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
     text = output.read_text(encoding='utf-8')
 
-    assert 'renderTraceSummarySection' in text
-    assert 'renderTraceSummaryCard' in text
-    assert 'trace-summary-expanded' in text
+    assert 'renderAnswerInsights' in text
+    assert 'renderEvidenceCards' in text
+    assert 'renderFocusTargets' in text
     assert 'typeql:' not in text
 
 
@@ -330,7 +443,7 @@ def test_exported_html_contains_instance_qa_stage_handlers(tmp_path: Path):
     assert 'reasoning_done' in text
     assert 'trace_summary_ready' in text
     assert 'handleInstanceQaStageEvent' in text
-    assert 'renderTraceSummaryCard' in text
+    assert 'renderAnswerInsights' in text
     assert 'renderInstanceQaTraceReport' not in text
 
 

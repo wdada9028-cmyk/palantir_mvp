@@ -3,14 +3,110 @@
 ## Current State
 - Agent: Codex
 - Branch: codex/typedb-instance-qa-design
-- Last session: 2026-04-08 10:36
-- Active work: integrated compact/expanded trace summary into instance QA backend, SSE, and UI
+- Last session: 2026-04-09 14:52
+- Active work: instance QA stream now emits live schema trace events for graph playback
 - Blockers: None
 - Next steps:
-  - Smoke-test `/api/qa/stream` in the browser with a real TypeDB-backed question
-  - If UI output is accepted, stage and commit the trace-summary changes
+  - Manual browser smoke on a real QA question to confirm graph playback now starts during the stream
+  - Decide whether to commit only the schema-trace streaming changes or bundle them with the already-pending unrelated diffs
 
 ## Session History
+
+### 2026-04-09 14:52 - Codex
+**What was done:**
+- Added a new plan for streaming existing schema retrieval trace through the instance QA SSE path
+- Reused `retrieve_ontology_evidence(...)` inside `instance_qa/orchestrator.py` and attached the schema retrieval bundle to `InstanceQAResult`
+- Updated `server/ontology_http_service.py` to emit `trace_anchor`, `trace_expand`, and `evidence_final` before TypeDB query stages
+- Guarded the front-end so live trace events take priority over the synthetic schema playback fallback
+- Re-ran stream/export/server integration tests and the full suite
+
+**Decisions made:**
+- Do not introduce a second schema retrieval pass; reuse the existing retrieval result only
+- Keep the current front-end trace protocol and make the back-end instance QA stream conform to it
+
+**Open questions:**
+- Whether to do a quick browser smoke before commit or commit directly after tests
+
+### 2026-04-09 11:45 - Codex
+**What was done:**
+- Added a new plan for schema-only playback in the QA focus tab
+- Reworked `export/graph_export.py` so instance QA stage events only update status/summary, while graph playback is now built from schema retrieval data (`question_dsl` + `evidence_bundle`)
+- Added focused regression tests proving the focus playback no longer uses TypeDB/result/reasoning stages as graph steps
+- Re-ran export tests, server/integration tests, and the full suite
+
+**Decisions made:**
+- The ontology graph should visualize only entity/schema retrieval, not instance query or reasoning phases
+- For instance QA, playback is built after schema evidence is ready and defaults to a non-realtime replayable sequence
+
+**Open questions:**
+- Whether to do a live browser smoke before commit or commit directly after tests
+
+### 2026-04-09 11:22 - Codex
+**What was done:**
+- Added a new implementation plan file for live retrieval playback in the QA focus tab
+- Added RED tests for playback controls and auto-play hooks, then updated `export/graph_export.py`
+- Made instance QA stage snapshots auto-drive `replayFromSnapshot(...)` so the ontology graph now animates during retrieval
+- Added focus playback controls (prev / replay / next) and kept them inside the graph focus tab only
+- Re-ran export tests, server/integration tests, and the full test suite
+
+**Decisions made:**
+- Keep dynamic retrieval playback in the graph focus tab rather than polluting the answer tab
+- Reuse existing SSE snapshots and playback infrastructure instead of adding new backend events
+
+**Open questions:**
+- Whether the next step should be a manual browser smoke only, or direct commit after a quick live check
+
+### 2026-04-09 11:05 - Codex
+**What was done:**
+- Tightened the QA panel so Answer / Evidence / Focus each own a single job
+- Removed the large customer-facing trace block from the answer tab and kept only answer text, answer mode, reasoning basis, and data gaps
+- Switched the evidence tab to instance cards and kept retrieval playback under the graph focus tab
+- Updated export integration tests and re-ran export, server/integration, and full-suite verification
+
+**Decisions made:**
+- Do not duplicate the same content across answer, evidence, and focus views
+- Keep retrieval playback visible, but only from the graph focus tab
+
+**Open questions:**
+- Whether to commit the current branch diff as-is or split the already-pending unrelated changes first
+
+### 2026-04-09 09:29 - Codex
+**What was done:**
+- Added front-end QA tabs in `export/graph_export.py`: ???? / ???? / ????
+- Reworked the right panel so answer text stays in the answer tab, trace summary stays customer-readable, and key evidence / focus targets get dedicated renderers
+- Added regression coverage in `tests/integration/test_definition_graph_export.py` for tab shell, answer routing, evidence cards, focus handlers, and clean trace output
+- Re-ran focused export tests, server/integration tests, and the full suite
+
+**Decisions made:**
+- Keep the existing SSE contract and graph replay logic; only reorganize the front-end presentation layer
+- Continue hiding TypeQL / query-plan style debug content from the customer-facing panel
+
+**Open questions:**
+- None
+
+### 2026-04-08 11:17 - Codex
+**What was done:**
+- Changed config behavior so `search/intent_resolver.py` and `qa/generator.py` both use shared `QWEN_API_BASE` / `QWEN_API_KEY`
+- Kept only model split: `QWEN_INTENT_MODEL` for seed selection and `QWEN_ANSWER_MODEL` for final answer generation
+- Updated tests to prove intent/answer-specific base/key are ignored and re-ran focused plus full-suite verification
+
+**Decisions made:**
+- Base URL and API key stay single-source; only model names are split by task
+
+**Open questions:**
+- None
+
+### 2026-04-08 11:07 - Codex
+**What was done:**
+- Added dual-model env support: `search/intent_resolver.py` now prefers `QWEN_INTENT_*`, `qa/generator.py` now prefers `QWEN_ANSWER_*`, both still fallback to shared `QWEN_*`
+- Added RED/GREEN regression tests for intent-specific and answer-specific env precedence
+- Re-ran focused search/generator tests and the full suite
+
+**Decisions made:**
+- Keep backward compatibility with existing `QWEN_*` env vars while enabling separate models for intent routing and final answer generation
+
+**Open questions:**
+- Which exact answer model to pin in env for production
 
 ### 2026-04-08 10:36 - Codex
 **What was done:**

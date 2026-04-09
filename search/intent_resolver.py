@@ -131,8 +131,15 @@ def _load_config() -> _IntentResolverConfig | None:
     return _IntentResolverConfig(
         api_base=api_base,
         api_key=api_key,
-        model=os.getenv('QWEN_MODEL', _DEFAULT_MODEL).strip() or _DEFAULT_MODEL,
+        model=_get_env('QWEN_INTENT_MODEL', 'QWEN_MODEL') or _DEFAULT_MODEL,
     )
+
+
+def _get_env(primary: str, fallback: str) -> str:
+    value = os.getenv(primary, '').strip()
+    if value:
+        return value
+    return os.getenv(fallback, '').strip()
 
 
 def _build_prompt(graph: OntologyGraph, query: str, *, object_ids: set[str] | None = None) -> str:

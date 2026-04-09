@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 from ..models.ontology import OntologyGraph
 from ..qa.template_answering import TemplateAnswer, build_instance_template_answer
+from ..search.ontology_query_engine import retrieve_ontology_evidence
+from ..search.ontology_query_models import OntologyEvidenceBundle
 from ..search.query_parser import parse_query
 from .evidence_bundle_builder import build_evidence_bundle
 from .evidence_models import EvidenceBundle
@@ -32,6 +34,7 @@ class InstanceQAResult:
     fact_queries: list[dict[str, object]]
     fact_pack: dict[str, object]
     evidence_bundle: EvidenceBundle
+    schema_retrieval_bundle: OntologyEvidenceBundle
     llm_answer_context: LLMAnswerContext
     reasoning: dict[str, object]
     trace_summary: dict[str, object]
@@ -50,6 +53,7 @@ _IDENTIFIER_FALLBACK_KEYS = ('id', 'room_id', 'floor_id', 'milestone_id', 'posit
 
 def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
     schema_registry = build_schema_registry(graph)
+    schema_retrieval_bundle = retrieve_ontology_evidence(graph, question)
     parsed = parse_query(question)
     question_dsl = _build_question_dsl(question, parsed.normalized_query, schema_registry)
     question_validation_error = validate_question_dsl(question_dsl, schema_registry)
@@ -131,6 +135,7 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
         fact_queries=fact_query_records,
         fact_pack=fact_pack,
         evidence_bundle=evidence_bundle,
+        schema_retrieval_bundle=schema_retrieval_bundle,
         llm_answer_context=llm_answer_context,
         reasoning=reasoning,
         trace_summary=trace_summary,

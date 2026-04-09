@@ -114,6 +114,39 @@ def test_instance_qa_stream_detects_deadline_mode(tmp_path: Path, deadline_keywo
     assert question_payload['question_dsl']['scenario']['event_type'] == 'fire'
 
 
+
+def test_instance_qa_stream_emits_schema_trace_events_before_typedb_queries(tmp_path: Path):
+    input_file = tmp_path / 'ontology.md'
+    _write_ontology(input_file)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'Room WorkAssignment relation'})
+
+    assert response.status_code == 200
+    text = response.text
+    assert 'event: trace_anchor' in text
+    assert 'event: evidence_final' in text
+    assert text.index('event: question_dsl') < text.index('event: trace_anchor')
+    assert text.index('event: evidence_final') < text.index('event: fact_query_planned')
+
+
+def test_instance_qa_stream_trace_expand_payload_uses_search_trace_snapshots(tmp_path: Path):
+    input_file = tmp_path / 'ontology.md'
+    _write_ontology(input_file)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'Room WorkAssignment relation'})
+
+    assert response.status_code == 200
+    expand_payloads = _event_payloads(response.text, 'trace_expand')
+    assert expand_payloads
+    expand_payload = expand_payloads[0]
+    assert 'snapshot_node_ids' in expand_payload
+    assert 'snapshot_edge_ids' in expand_payload
+    assert 'delay_ms' in expand_payload
+
 def test_instance_qa_stream_answer_done_contains_trace_summary_sections(tmp_path: Path):
     input_file = tmp_path / 'ontology.md'
     _write_ontology(input_file)
