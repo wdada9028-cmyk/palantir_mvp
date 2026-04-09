@@ -156,6 +156,88 @@ def test_resolve_intent_filters_unknown_seed_ids(monkeypatch):
     assert result.error == ''
 
 
+
+
+def test_resolve_intent_candidate_mode_filters_to_candidate_ids(monkeypatch):
+    graph = _build_graph()
+
+    monkeypatch.setenv('QWEN_API_BASE', 'https://example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'test-key')
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'choices': [
+                    {
+                        'message': {
+                            'content': '{"seeds": ["object_type:PoDPosition", "object_type:ArrivalPlan"], "reasoning": "\u66f4\u50cf\u5728\u95ee\u6cca\u4f4d"}'
+                        }
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def post(self, *args, **kwargs):
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        'cloud_delivery_ontology_palantir.search.intent_resolver.get_http_client',
+        lambda: FakeClient(),
+    )
+
+    result = resolve_intent(graph, '\u6cca\u4f4d\u5728\u54ea\u91cc', candidate_ids=['object_type:PoDPosition'])
+
+    assert result.seeds == ['object_type:PoDPosition']
+    assert result.source == 'llm_candidate_select'
+    assert result.reasoning == '\u66f4\u50cf\u5728\u95ee\u6cca\u4f4d'
+    assert result.error == ''
+
+
+def test_resolve_intent_candidate_mode_limits_prompt_schema_to_candidates(monkeypatch):
+    graph = _build_graph()
+
+    monkeypatch.setenv('QWEN_API_BASE', 'https://example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'test-key')
+
+    captured_payload = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                'choices': [
+                    {
+                        'message': {
+                            'content': '{"seeds": ["object_type:PoDPosition"], "reasoning": "\u547d\u4e2d\u6cca\u4f4d"}'
+                        }
+                    }
+                ]
+            }
+
+    class FakeClient:
+        def post(self, url, headers=None, json=None, timeout=None):
+            captured_payload['json'] = json
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        'cloud_delivery_ontology_palantir.search.intent_resolver.get_http_client',
+        lambda: FakeClient(),
+    )
+
+    result = resolve_intent(graph, '\u6cca\u4f4d\u5728\u54ea\u91cc', candidate_ids=['object_type:PoDPosition'])
+
+    assert result.seeds == ['object_type:PoDPosition']
+    assert result.source == 'llm_candidate_select'
+
+    user_prompt = captured_payload['json']['messages'][1]['content']
+    assert 'id=object_type:PoDPosition; chinese_description=\u6cca\u4f4d' in user_prompt
+    assert 'id=object_type:ArrivalPlan; chinese_description=\u5230\u8d27\u8ba1\u5212' not in user_prompt
+
 def test_build_prompt_uses_minimal_deduped_schema_summary(monkeypatch):
     graph = _build_graph()
     arrival_plan = graph.get_object('object_type:ArrivalPlan')

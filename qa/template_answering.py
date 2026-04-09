@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 from dataclasses import dataclass
@@ -19,79 +19,100 @@ class TemplateAnswer:
 
 
 def build_template_answer(bundle: OntologyEvidenceBundle) -> TemplateAnswer:
-    evidence_refs = ''.join(f'[{item.evidence_id}]' for item in bundle.evidence_chain)
-    seed_labels = _dedupe_preserve_order([_display_name(bundle, node_id) for node_id in bundle.seed_node_ids])
+    seed_labels = _dedupe_preserve_order([_summary_name(bundle, node_id) for node_id in bundle.seed_node_ids])
     unique_trace_steps = _dedupe_trace_steps(bundle.search_trace.expansion_steps)
-    trace_report = _build_search_trace_report(bundle, unique_trace_steps)
     relation_lines = _build_relation_summary_lines(bundle, unique_trace_steps)
 
     if bundle.insufficient_evidence:
-        parts: list[str] = []
-        if trace_report:
-            parts.append(f'检索路径报告：{trace_report}。')
-        parts.append(
-            f'证据不足：当前系统仅包含本体定义，不包含实例运行状态或实时数据，无法直接回答“{bundle.question}”。'
-        )
+        parts: list[str] = [
+            f'\u8bc1\u636e\u4e0d\u8db3\uff1a\u5f53\u524d\u7cfb\u7edf\u4ec5\u5305\u542b\u672c\u4f53\u5b9a\u4e49\uff0c\u4e0d\u5305\u542b\u5b9e\u4f8b\u8fd0\u884c\u72b6\u6001\u6216\u5b9e\u65f6\u6570\u636e\uff0c\u65e0\u6cd5\u76f4\u63a5\u56de\u7b54\u201c{bundle.question}\u201d\u3002'
+        ]
         if seed_labels:
-            parts.append(f'已命中本体实体：{"、".join(seed_labels)}。')
-        parts.append(f'证据：{evidence_refs or "[E0]"}。')
+            joined_seed_labels = '\u3001'.join(seed_labels)
+            parts.append(f'\u5df2\u547d\u4e2d\u7684\u672c\u4f53\u5b9e\u4f53\u5305\u62ec\uff1a{joined_seed_labels}\u3002')
         return TemplateAnswer(answer=''.join(parts), insufficient_evidence=True)
 
     if relation_lines:
-        summary = '命中关系：\n' + '\n'.join(f'- {line}' for line in relation_lines)
-        summary = f'{summary}\n证据：{evidence_refs or "[E0]"}。'
+        summary = '\u6839\u636e\u5f53\u524d\u672c\u4f53\u5b9a\u4e49\uff0c\u76f8\u5173\u5173\u952e\u5173\u7cfb\u5305\u62ec\uff1a\n' + '\n'.join(f'- {line}' for line in relation_lines)
     elif seed_labels:
-        summary = f'根据当前本体定义，问题主要命中实体：{"、".join(seed_labels)}。证据：{evidence_refs or "[E0]"}。'
+        joined_seed_labels = '\u3001'.join(seed_labels)
+        summary = f'\u6839\u636e\u5f53\u524d\u672c\u4f53\u5b9a\u4e49\uff0c\u95ee\u9898\u4e3b\u8981\u6d89\u53ca\u8fd9\u4e9b\u5b9e\u4f53\uff1a{joined_seed_labels}\u3002'
     else:
-        summary = f'证据不足：当前本体定义中未匹配到可用实体或关系。证据：{evidence_refs or "[E0]"}。'
-
-    if trace_report:
-        summary = f'检索路径报告：{trace_report}。{summary}'
+        summary = '\u8bc1\u636e\u4e0d\u8db3\uff1a\u5f53\u524d\u672c\u4f53\u5b9a\u4e49\u4e2d\u672a\u5339\u914d\u5230\u53ef\u7528\u5b9e\u4f53\u6216\u5173\u7cfb\u3002'
     return TemplateAnswer(answer=summary, insufficient_evidence=False)
 
 
 def _build_search_trace_report(bundle: OntologyEvidenceBundle, trace_steps: list[TraceExpansionStep]) -> str:
-    parts: list[str] = []
-    reasoning = bundle.search_trace.seed_resolution_reasoning.strip()
-    if reasoning:
-        parts.append(reasoning)
+    formatter = _TraceNameFormatter(bundle)
+    sections: list[str] = []
 
     anchor_ids = bundle.search_trace.seed_node_ids or bundle.seed_node_ids
-    anchor_labels = _dedupe_preserve_order([_display_name(bundle, node_id) for node_id in anchor_ids if node_id])
+    anchor_labels = _dedupe_preserve_order([formatter.format(node_id) for node_id in anchor_ids if node_id])
     if anchor_labels:
-        parts.append(f'通过匹配“{"、".join(anchor_labels)}”定位到核心概念')
+        sections.append(_render_trace_section('\u8bc6\u522b\u51fa\u7684\u6838\u5fc3\u5b9e\u4f53', anchor_labels))
 
-    for step in trace_steps:
-        parts.append(
-            f'随后从 {_display_name(bundle, step.from_node_id)} 沿 {_relation_name(bundle, step.relation)} 扩展到 {_display_name(bundle, step.to_node_id)}'
-        )
+    reasoning = bundle.search_trace.seed_resolution_reasoning.strip()
+    reasoning_lines = _split_trace_lines(reasoning)
+    if reasoning_lines:
+        sections.append(_render_trace_section('\u5b9e\u4f53\u8bc6\u522b\u4f9d\u636e', reasoning_lines))
 
-    if bundle.search_trace.seed_resolution_error:
-        parts.append(f'解析回退：{bundle.search_trace.seed_resolution_error}')
+    expansion_lines = [
+        f'\u4ece{formatter.format(step.from_node_id)} \u6cbf {_relation_name(bundle, step.relation)} \u6269\u5c55\u5230 {formatter.format(step.to_node_id)}'
+        for step in trace_steps
+    ]
+    expansion_lines = _dedupe_preserve_order(expansion_lines)
+    if expansion_lines:
+        sections.append(_render_trace_section('\u5173\u952e\u6269\u5c55', expansion_lines))
 
-    return '；'.join(part for part in parts if part)
+    relation_lines = [
+        f'{formatter.format(step.from_node_id)} {_relation_name(bundle, step.relation)} {formatter.format(step.to_node_id)}'
+        for step in trace_steps
+    ]
+    relation_lines = _dedupe_preserve_order(relation_lines)
+    if relation_lines:
+        sections.append(_render_trace_section('\u547d\u4e2d\u7684\u5173\u952e\u5173\u7cfb', relation_lines))
+
+    fallback_lines = _split_trace_lines(bundle.search_trace.seed_resolution_error)
+    if fallback_lines:
+        sections.append(_render_trace_section('\u89e3\u6790\u56de\u9000', fallback_lines))
+
+    return '\n\n'.join(section for section in sections if section)
+
+
+def _render_trace_section(title: str, lines: list[str]) -> str:
+    cleaned_lines = [line.strip() for line in lines if line and line.strip()]
+    if not cleaned_lines:
+        return ''
+    return title + '\n' + '\n'.join(f'- {line}' for line in cleaned_lines)
+
+
+def _split_trace_lines(text: str) -> list[str]:
+    if not text:
+        return []
+    parts = re.split(r'[\r\n?;]+', text)
+    return [part.strip() for part in parts if part and part.strip()]
 
 
 def _build_relation_summary_lines(bundle: OntologyEvidenceBundle, trace_steps: list[TraceExpansionStep]) -> list[str]:
     lines = [
-        f'{_display_name(bundle, step.from_node_id)} {_relation_name(bundle, step.relation)} {_display_name(bundle, step.to_node_id)}'
+        f'{_summary_name(bundle, step.from_node_id)} {_relation_name(bundle, step.relation)} {_summary_name(bundle, step.to_node_id)}'
         for step in trace_steps
     ]
     if lines:
-        return lines
+        return _dedupe_preserve_order(lines)
 
     fallback_lines: list[str] = []
     visited_edges: set[tuple[str, str, str]] = set()
     for item in bundle.evidence_chain:
         if item.kind != 'relation' or len(item.node_ids) < 2:
             continue
-        left = _display_name(bundle, item.node_ids[0])
-        right = _display_name(bundle, item.node_ids[1])
-        key = (left, '[关联]', right)
+        left = _summary_name(bundle, item.node_ids[0])
+        right = _summary_name(bundle, item.node_ids[1])
+        key = (left, '[\u5173\u8054]', right)
         if key in visited_edges:
             continue
         visited_edges.add(key)
-        fallback_lines.append(f'{left} [关联] {right}')
+        fallback_lines.append(f'{left} [\u5173\u8054] {right}')
     return fallback_lines
 
 
@@ -108,17 +129,46 @@ def _dedupe_trace_steps(trace_steps: list[TraceExpansionStep]) -> list[TraceExpa
 
 
 def _display_name(bundle: OntologyEvidenceBundle, node_id: str) -> str:
-    suffix = str(node_id or '').split(':', 1)[-1].strip() or node_id
+    label, english = _display_parts(bundle, node_id)
+    if label and english and label != english:
+        return f'{label}({english})'
+    return label or english
+
+
+def _summary_name(bundle: OntologyEvidenceBundle, node_id: str) -> str:
+    label, english = _display_parts(bundle, node_id)
+    return label or english
+
+
+def _display_parts(bundle: OntologyEvidenceBundle, node_id: str) -> tuple[str, str]:
+    english = str(node_id or '').split(':', 1)[-1].strip() or node_id
     raw_display_name = bundle.display_name_map.get(node_id, '').strip()
     if not raw_display_name:
-        return suffix
+        return '', english
 
-    suffix_token = f'({suffix})'
+    suffix_token = f'({english})'
     label = raw_display_name[:-len(suffix_token)].strip() if raw_display_name.endswith(suffix_token) else raw_display_name
-    label = re.split(r'[。；;，,：:\n\r]', label, maxsplit=1)[0].strip()
-    if not label or label == suffix:
-        return suffix
-    return f'{label}({suffix})'
+    label = re.split(r'[\u3002\uff1b;\uff0c,\uff1a:\n\r]', label, maxsplit=1)[0].strip()
+    if not label or label == english:
+        return '', english
+    return label, english
+
+
+class _TraceNameFormatter:
+    def __init__(self, bundle: OntologyEvidenceBundle) -> None:
+        self._bundle = bundle
+        self._seen: set[str] = set()
+
+    def format(self, node_id: str) -> str:
+        label, english = _display_parts(self._bundle, node_id)
+        if not label:
+            return english
+        if not english or label == english:
+            return label
+        if node_id in self._seen:
+            return label
+        self._seen.add(node_id)
+        return f'{label}({english})'
 
 
 def _relation_name(bundle: OntologyEvidenceBundle, relation: str) -> str:
