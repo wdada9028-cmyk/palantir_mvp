@@ -1,16 +1,62 @@
-# Session Log
+﻿# Session Log
 
 ## Current State
 - Agent: Codex
-- Branch: codex/typedb-instance-qa-design
-- Last session: 2026-04-09 14:52
-- Active work: instance QA stream now emits live schema trace events for graph playback
+- Branch: codex/llm-question-router
+- Last session: 2026-04-10 16:39
+- Active work: cleaned QA playback/status copy, removed raw ** entity emphasis in the answer panel, and fixed attribute-lookup fallback wording so POD status answers and trace replay stay customer-readable
 - Blockers: None
 - Next steps:
-  - Manual browser smoke on a real QA question to confirm graph playback now starts during the stream
-  - Decide whether to commit only the schema-trace streaming changes or bundle them with the already-pending unrelated diffs
+  - Browser-smoke POD-001??????? and L1-A??????????????
+  - If the live browser is clean, commit the router + playback UX changes together
 
 ## Session History
+
+
+### 2026-04-10 16:39 - Codex
+**What was done:**
+- Fixed instance-QA SSE trace copy so `trace_anchor`, `trace_expand`, and `evidence_final` now emit readable Chinese instead of placeholder question marks
+- Cleaned `build_instance_template_answer(...)` so attribute lookups return natural sentences like `POD-001 ????? Installing?`
+- Updated instance answer style guidance to discourage Markdown emphasis and added front-end formatting that converts accidental `**...**` inline emphasis into a styled pill instead of raw asterisks
+- Added regression tests for clean trace copy, clean attribute fallback wording, and answer-panel formatting; re-ran targeted suites plus the full suite successfully
+
+**Decisions made:**
+- Keep the router/playback behavior unchanged; only repair customer-visible wording and answer rendering
+- Handle stray Markdown emphasis defensively in the front end while also steering the LLM away from `**...**` in prompts
+
+**Open questions:**
+- Whether to do one final manual browser smoke before commit
+
+
+### 2026-04-10 15:58 - Codex
+**What was done:**
+- Changed instance QA schema playback so `anchor_only` queries build a seed-only schema bundle instead of reusing the old expanding schema retrieval path
+- Added regression coverage proving `POD-001???????` emits `trace_anchor` only and no `trace_expand` events
+- Revalidated the service behavior manually: POD status queries now highlight only `PoD`, while impact analysis still uses schema-entity expansion
+- Re-ran targeted suites and the full test suite successfully
+
+**Decisions made:**
+- Playback must follow router scope, not independently re-run broad schema retrieval for attribute lookups
+- Even for `expand_graph`, playback remains schema-entity-only; instance rows stay answer-side only
+
+**Open questions:**
+- Whether to expose the chosen router scope directly in the front-end debug panel
+
+### 2026-04-10 15:27 - Codex
+**What was done:**
+- Verified `typedb_schema_v4.converted.md` was not empty and isolated the real router failure to prompt corruption plus a 5-second router timeout
+- Rewrote instance_qa/question_router.py so the prompt is readable again, embeds full converted schema markdown, and defaults the router model to qwen3.6-plus
+- Updated instance_qa/orchestrator.py to pass resolved schema markdown into the router before falling back to legacy parsing
+- Added router timeout coverage, schema-markdown prompt coverage, and an autouse test fixture that clears QWEN env vars so tests stay hermetic
+- Re-ran targeted suites and the full test suite successfully
+
+**Decisions made:**
+- Use `typedb_schema_v4.converted.md` directly in the router prompt instead of raw TQL or a hand-written schema summary
+- Increase the router timeout to 30 seconds to avoid silent fallback into the legacy Project-based anchor path
+- Keep legacy parsing as fallback, but isolate tests from real external LLM settings by default
+
+**Open questions:**
+- Whether to add explicit router event/debug output into SSE so front-end can show the chosen route directly
 
 ### 2026-04-09 14:52 - Codex
 **What was done:**
@@ -223,11 +269,11 @@
 - Inspected CLI, pipeline, parser, graph builder/exporter, server, search, QA modules, tests, and docs plans
 - Ran `python -m cloud_delivery_ontology_palantir.cli --help`
 - Ran `pytest tests -q` and got `80 passed`
-- Verified the main sample `typedb_schema_v4.tql` currently resolves to `typedb_schema_v4.converted.md` with `21` object types and `41` relations
+- Verified the main sample `typedb_schema_v4.tql` currently resolves to `ttypedb_schema_v4.converted.md` with `21` object types and `41` relations
 
 **Decisions made:**
 - Treat the repo's current center as deterministic ontology-definition graph build/serve, with optional Qwen-backed intent resolution and answer generation layered on top
-- Use `typedb_schema_v4.tql` or `typedb_schema_v4.converted.md` as the primary local sanity input pair
+- Use `typedb_schema_v4.tql` or `ttypedb_schema_v4.converted.md` as the primary local sanity input pair
 
 **Open questions:**
 - None
@@ -314,7 +360,7 @@
 - Verified the new labels also flow through Link Types business descriptions automatically where those object types are referenced
 - Re-ran `pytest tests/pipelines/test_input_file_resolver.py tests/integration/test_build_ontology_cli.py tests/server/test_ontology_http_app.py -q` and got `23 passed`
 - Re-ran `pytest tests -q` and got `85 passed`
-- Verified real `typedb_schema_v4.converted.md` contains all requested updated labels
+- Verified real `ttypedb_schema_v4.converted.md` contains all requested updated labels
 
 **Decisions made:**
 - Object type naming is still controlled deterministically in the renderer mapping table, not by prompt
@@ -369,7 +415,7 @@
 - Verified `pytest tests/ontology/test_definition_markdown_parser.py tests/pipelines/test_input_file_resolver.py tests/pipelines/test_tql_markdown_enhancer.py -q` -> `19 passed`
 - Verified `pytest tests/pipelines/test_input_file_resolver.py tests/integration/test_build_ontology_cli.py tests/server/test_ontology_http_app.py -q` -> `20 passed`
 - Verified `pytest tests -q` -> `82 passed`
-- Verified real `typedb_schema_v4.tql -> typedb_schema_v4.converted.md` now starts with the new headings and parses successfully with `21` objects / `42` relations
+- Verified real `typedb_schema_v4.tql -> ttypedb_schema_v4.converted.md` now starts with the new headings and parses successfully with `21` objects / `42` relations
 - Verified live `serve-ontology --input-file typedb_schema_v4.tql` smoke on port `8772`; `/api/graph` returned `200` with `63` elements
 
 **Decisions made:**
@@ -388,7 +434,7 @@
 - Re-ran `pytest tests/pipelines/test_tql_markdown_enhancer.py -v` and got `6 passed`
 - Re-ran focused regression tests and got `19 passed`
 - Re-ran `pytest tests -q` and got `80 passed`
-- Verified real `typedb_schema_v4.tql -> typedb_schema_v4.converted.md` now uses enhancement (`same_as_skeleton=False`) and still parses with `22` object types and `42` relations
+- Verified real `typedb_schema_v4.tql -> ttypedb_schema_v4.converted.md` now uses enhancement (`same_as_skeleton=False`) and still parses with `22` object types and `42` relations
 - Verified live `serve-ontology --input-file typedb_schema_v4.tql` smoke on port `8771`; `/api/graph` returned `200` with `64` elements
 
 **Decisions made:**
@@ -470,7 +516,7 @@
 - Added RED/GREEN tests proving `.tql` conversion can work without Qwen env vars and still feed the existing markdown parser/build pipeline
 - Added deterministic TQL schema extraction and fixed markdown rendering modules: `pipelines/tql_schema_models.py`, `pipelines/tql_schema_extractor.py`, `pipelines/tql_schema_renderer.py`
 - Updated `pipelines/tql_to_markdown.py` so `convert_tql_file_to_markdown_file(...)` now renders parser-compatible markdown locally and validates it with `parse_definition_markdown(...)` before writing
-- Verified real `typedb_schema_v4.tql` now converts successfully into `typedb_schema_v4.converted.md` with `22` object types and `42` relations
+- Verified real `typedb_schema_v4.tql` now converts successfully into `ttypedb_schema_v4.converted.md` with `22` object types and `42` relations
 - Verified live `serve-ontology --input-file typedb_schema_v4.tql` smoke on port `8771` and `/api/graph` returned successfully with `64` elements
 - Ran `pytest tests/pipelines/test_input_file_resolver.py tests/integration/test_build_ontology_cli.py tests/server/test_ontology_http_app.py -q` and got `16 passed`
 - Ran `pytest tests -q` and got `59 passed`
@@ -489,7 +535,7 @@
 - Updated the stale CLI integration test to match the current `.md`/`.tql` serve help contract
 - Ran `pytest tests/pipelines/test_input_file_resolver.py tests/integration/test_build_ontology_cli.py tests/server/test_ontology_http_app.py -q` and got `14 passed`
 - Ran `pytest tests -q` and got `57 passed`
-- Verified real `typedb_schema_v4.tql` conversion now completes and writes `typedb_schema_v4.converted.md`
+- Verified real `typedb_schema_v4.tql` conversion now completes and writes `ttypedb_schema_v4.converted.md`
 - Verified direct `serve-ontology --input-file typedb_schema_v4.tql` no longer fails on HTTP timeout; it now fails later because the generated markdown does not match parser-required structure
 
 **Decisions made:**
@@ -669,3 +715,4 @@
 
 **Open questions:**
 - None
+

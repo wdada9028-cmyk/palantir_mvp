@@ -1,5 +1,5 @@
 ﻿from cloud_delivery_ontology_palantir.models.ontology import OntologyGraph, OntologyObject
-from cloud_delivery_ontology_palantir.search.intent_resolver import _build_prompt, resolve_intent
+from cloud_delivery_ontology_palantir.search.intent_resolver import _build_prompt, _load_config, resolve_intent
 
 
 def _build_graph() -> OntologyGraph:
@@ -299,3 +299,15 @@ def test_build_prompt_uses_minimal_deduped_schema_summary(monkeypatch):
     assert 'name=' not in prompt
     assert 'aliases=' not in prompt
     assert 'group=' not in prompt
+
+
+def test_intent_resolver_defaults_to_qwen36_plus(monkeypatch):
+    monkeypatch.setenv('QWEN_API_BASE', 'https://example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'test-key')
+    monkeypatch.delenv('QWEN_MODEL', raising=False)
+    monkeypatch.delenv('QWEN_INTENT_MODEL', raising=False)
+
+    config = _load_config()
+
+    assert config is not None
+    assert config.model == 'qwen3.6-plus'

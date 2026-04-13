@@ -469,3 +469,23 @@ def test_exported_html_embeds_javascript_without_syntax_error(tmp_path: Path):
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_exported_html_uses_clean_qa_copy_and_formats_answer_text(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert '\u667a\u80fd\u95ee\u7b54\u52a9\u624b' in text
+    assert '\u7b54\u6848\u6458\u8981' in text
+    assert '\u5173\u952e\u8bc1\u636e' in text
+    assert '\u56fe\u8c31\u5b9a\u4f4d' in text
+    assert '\u68c0\u7d22\u56de\u653e' in text
+    assert '\u72b6\u6001' in text
+    assert '\u5173\u7cfb\u56fe\u4f8b' in text
+    assert '\u8282\u70b9\u8be6\u60c5' in text
+    assert 'formatQaAnswer' in text
+    assert 'qa-answer-inline-entity' in text
+    assert '\*\*([^*]+)\*\*' in text
+    for bad in ['????', '????', '???', '???', '????', '??']:
+        assert bad not in text

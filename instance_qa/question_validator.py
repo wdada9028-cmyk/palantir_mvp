@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from .question_models import QuestionDSL
 from .schema_registry import SchemaRegistry
@@ -13,11 +13,15 @@ _ALLOWED_EVENT_TYPES = {
     'generic_incident',
 }
 _ALLOWED_GOAL_TYPES = {'list_impacts', 'yes_no_risk', 'explain_risk', 'instance_lookup', 'count'}
+_ALLOWED_REASONING_SCOPES = {'anchor_only', 'expand_graph'}
 
 
 def validate_question_dsl(question: QuestionDSL, schema_registry: SchemaRegistry) -> str | None:
     if question.mode not in _ALLOWED_MODES:
         return f'Unsupported question mode: {question.mode}'
+
+    if question.reasoning_scope not in _ALLOWED_REASONING_SCOPES:
+        return f'Unsupported reasoning scope: {question.reasoning_scope}'
 
     anchor = question.anchor
     entity = schema_registry.entities.get(anchor.entity)
@@ -29,6 +33,10 @@ def validate_question_dsl(question: QuestionDSL, schema_registry: SchemaRegistry
             return f'Unknown anchor identifier attribute {anchor.identifier.attribute!r} for entity {anchor.entity}'
         if anchor.identifier.attribute not in entity.key_attributes:
             return f'Anchor identifier attribute {anchor.identifier.attribute!r} must be a key attribute for entity {anchor.entity}'
+
+    invalid_target_attributes = [item for item in question.target_attributes if item not in entity.attributes]
+    if invalid_target_attributes:
+        return f'Unknown target attributes for {anchor.entity}: {", ".join(invalid_target_attributes)}'
 
     scenario = question.scenario
     if scenario is not None and scenario.event_type not in _ALLOWED_EVENT_TYPES:

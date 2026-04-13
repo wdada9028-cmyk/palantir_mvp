@@ -2,6 +2,8 @@ from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import sys
 
+import pytest
+
 WORKSPACE = Path(__file__).resolve().parents[1]
 PACKAGE_NAME = 'cloud_delivery_ontology_palantir'
 PACKAGE_INIT = WORKSPACE / '__init__.py'
@@ -28,3 +30,17 @@ def _ensure_workspace_package_alias() -> None:
 
 
 _ensure_workspace_package_alias()
+
+
+
+@pytest.fixture(autouse=True)
+def _isolate_qwen_env(monkeypatch):
+    for name in (
+        'QWEN_API_BASE',
+        'QWEN_API_KEY',
+        'QWEN_MODEL',
+        'QWEN_ANSWER_MODEL',
+        'QWEN_INTENT_MODEL',
+        'QWEN_ROUTER_MODEL',
+    ):
+        monkeypatch.delenv(name, raising=False)

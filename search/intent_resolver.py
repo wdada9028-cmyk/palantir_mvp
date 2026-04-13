@@ -9,7 +9,7 @@ import httpx
 
 from ..models.ontology import OntologyGraph, OntologyObject
 
-_DEFAULT_MODEL = 'qwen2.5-32b-instruct'
+_DEFAULT_MODEL = 'qwen3.6-plus'
 _HTTP_CLIENT: httpx.Client | None = None
 
 
@@ -218,3 +218,4 @@ def _dedupe_preserve_order(values: list[str] | Any) -> list[str]:
         seen.add(value)
         result.append(value)
     return result
+

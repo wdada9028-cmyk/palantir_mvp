@@ -1,4 +1,4 @@
-from cloud_delivery_ontology_palantir.instance_qa.fact_query_planner import build_fact_queries, build_propagation_queries
+﻿from cloud_delivery_ontology_palantir.instance_qa.fact_query_planner import build_fact_queries, build_propagation_queries
 from cloud_delivery_ontology_palantir.instance_qa.question_models import AnchorRef, ConstraintRef, GoalRef, IdentifierRef, QuestionDSL, ScenarioRef
 from cloud_delivery_ontology_palantir.instance_qa.schema_registry import SchemaAdjacency, SchemaEntity, SchemaRegistry
 
@@ -41,13 +41,14 @@ def _schema_registry() -> SchemaRegistry:
     )
 
 
-def _question(event_type: str = 'power_outage') -> QuestionDSL:
+def _question(event_type: str = 'power_outage', *, reasoning_scope: str = 'expand_graph') -> QuestionDSL:
     return QuestionDSL(
         mode='impact_analysis',
         anchor=AnchorRef(entity='Room', identifier=IdentifierRef(attribute='room_id', value='01'), surface='room-01'),
         scenario=ScenarioRef(event_type=event_type, duration=None, start_time=None, severity=None, raw_event='event'),
         goal=GoalRef(type='list_impacts', target_entity=None, target_metric=None, deadline=None),
         constraints=ConstraintRef(statuses=[], time_window=None, limit=20),
+        reasoning_scope=reasoning_scope,
     )
 
 
@@ -70,6 +71,12 @@ def test_build_fact_queries_keeps_neighbor_adjacency_as_parallel_queries():
     assert occurs_in_query.traversals[0].typedb_relation == 'work-assignment-room'
     assert occurs_in_query.traversals[0].entity_role == 'assigned-room'
     assert occurs_in_query.traversals[0].neighbor_role == 'assignment-record'
+
+
+def test_build_fact_queries_returns_only_anchor_query_for_anchor_only_scope():
+    queries = build_fact_queries(_question('power_outage', reasoning_scope='anchor_only'), _schema_registry())
+
+    assert [item.purpose for item in queries] == ['resolve_anchor']
 
 
 def test_build_fact_queries_uses_generic_fallback_when_event_profile_missing():
