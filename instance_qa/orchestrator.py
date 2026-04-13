@@ -9,6 +9,8 @@ from ..qa.template_answering import TemplateAnswer, build_instance_template_answ
 from ..search.ontology_query_engine import retrieve_ontology_evidence
 from ..search.ontology_query_models import EvidenceItem, OntologyEvidenceBundle, RetrievalStep, SearchTrace
 from ..search.query_parser import parse_query
+from .anchor_candidate_resolver import resolve_anchor_candidates
+from .anchor_locator_registry import build_anchor_locator_registry
 from .evidence_bundle_builder import build_evidence_bundle
 from .evidence_models import EvidenceBundle
 from .evidence_subgraph_builder import build_evidence_subgraph
@@ -21,7 +23,7 @@ from .llm_answer_context_builder import LLMAnswerContext, build_llm_answer_conte
 from .reasoner import build_reasoning_result
 from .schema_registry import SchemaEntity, SchemaRegistry, build_schema_registry
 from .trace_summary_builder import build_trace_summary
-from .typeql_builder import build_typeql_query
+from .typeql_builder import _type_label, build_typeql_query
 from .typedb_client import TypeDBClient, TypeDBConnectionError, TypeDBQueryError, load_typedb_config
 from .typedb_result_mapper import map_typedb_rows_to_fact_pack
 
@@ -49,13 +51,20 @@ _CAPACITY_LOSS_KEYWORDS = ('\u4ea7\u80fd\u4e0b\u964d', '\u8d44\u6e90\u4e0d\u8db3
 _ACCESS_BLOCKED_KEYWORDS = ('\u5c01\u9501', '\u5c01\u95ed', '\u65e0\u6cd5\u8fdb\u5165', '\u4e0d\u53ef\u8fdb\u5165', '\u8fdb\u4e0d\u53bb')
 _DEADLINE_HINTS = ('\u4ea4\u4ed8', '\u622a\u6b62\u65e5\u671f', 'deadline')
 _PROPAGATION_ROUNDS = 2
+_ANCHOR_CANDIDATE_LIMIT = 1000
 _IDENTIFIER_FALLBACK_KEYS = ('id', 'room_id', 'floor_id', 'milestone_id', 'position_id', 'assignment_id', 'pod_id', 'pod_code', 'activity_id', 'pod_schedule_id')
 
 
 def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
     schema_registry = build_schema_registry(graph)
     parsed = parse_query(question)
-    route = resolve_question_route(question, schema_registry, schema_markdown=_load_router_schema_markdown(graph))
+    anchor_resolution_payload = _resolve_anchor_resolution_payload(question, schema_registry)
+    route = resolve_question_route(
+        question,
+        schema_registry,
+        schema_markdown=_load_router_schema_markdown(graph),
+        anchor_resolution_payload=anchor_resolution_payload,
+    )
     question_dsl = _build_question_dsl(question, parsed.normalized_query, schema_registry, route=route)
     if question_dsl.reasoning_scope == 'anchor_only':
         schema_retrieval_bundle = _build_anchor_only_schema_bundle(graph, question_dsl, question)
@@ -269,6 +278,93 @@ def _load_router_schema_markdown(graph: OntologyGraph) -> str:
             return ''
         return load_schema_markdown(resolved)
     return ''
+
+
+def _resolve_anchor_resolution_payload(question: str, schema_registry: SchemaRegistry) -> dict[str, object] | None:
+    locator_registry = build_anchor_locator_registry(schema_registry)
+    if not locator_registry:
+        return None
+
+    surface_candidates = _extract_anchor_surface_candidates(question)
+    if not surface_candidates:
+        return None
+
+    candidate_rows_by_entity = _load_anchor_candidate_rows(locator_registry)
+    if not any(candidate_rows_by_entity.values()):
+        return None
+
+    fallback_payload: dict[str, object] | None = None
+    for raw_anchor_text in surface_candidates:
+        result = resolve_anchor_candidates(
+            raw_anchor_text=raw_anchor_text,
+            locator_registry=locator_registry,
+            candidate_rows_by_entity=candidate_rows_by_entity,
+        )
+        if result.selected is not None and result.match_stage in {'exact', 'light'}:
+            return _build_anchor_resolution_payload(result)
+        if fallback_payload is None and result.candidates:
+            fallback_payload = _build_anchor_resolution_payload(result)
+    return fallback_payload
+
+
+def _extract_anchor_surface_candidates(question: str) -> list[str]:
+    values: list[str] = []
+    seen: set[str] = set()
+    for match in re.findall(r'[A-Za-z0-9][A-Za-z0-9_\-/]{1,}', question):
+        value = str(match or '').strip().strip(',.!?;:??????')
+        if len(value) < 2 or not any('A' <= ch.upper() <= 'Z' for ch in value):
+            continue
+        key = value.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        values.append(value)
+    values.sort(key=len, reverse=True)
+    return values
+
+
+def _load_anchor_candidate_rows(locator_registry: dict[str, object]) -> dict[str, list[dict[str, object]]]:
+    result: dict[str, list[dict[str, object]]] = {}
+    for entity_name in locator_registry:
+        typeql = _build_anchor_candidate_query(entity_name)
+        rows, _ = _run_typeql_readonly(typeql)
+        result[entity_name] = rows
+    return result
+
+
+def _build_anchor_candidate_query(entity_name: str) -> str:
+    return '\n'.join(
+        [
+            'match',
+            f'$root isa {_type_label(entity_name)};',
+            'get $root;',
+            f'limit {_ANCHOR_CANDIDATE_LIMIT};',
+        ]
+    )
+
+
+def _build_anchor_resolution_payload(result) -> dict[str, object]:
+    return {
+        'raw_anchor_text': result.raw_anchor_text,
+        'match_stage': result.match_stage,
+        'selected': (
+            {
+                'entity': result.selected.entity,
+                'attribute': result.selected.attribute,
+                'value': result.selected.value,
+            }
+            if result.selected is not None
+            else None
+        ),
+        'candidates': [
+            {
+                'entity': candidate.entity,
+                'attribute': candidate.attribute,
+                'value': candidate.value,
+            }
+            for candidate in result.candidates[:5]
+        ],
+    }
 
 
 def _run_typeql_readonly(typeql: str) -> tuple[list[dict[str, object]], str | None]:

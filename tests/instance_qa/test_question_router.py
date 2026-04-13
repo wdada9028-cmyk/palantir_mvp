@@ -176,3 +176,31 @@ def test_resolve_question_route_uses_openai_client_and_router_timeout_120_second
     assert captured['temperature'] == 0.0
     assert captured['response_format'] == {'type': 'json_object'}
     assert captured['timeout'] == 120.0
+
+
+def test_build_question_router_prompt_embeds_anchor_resolution_payload_when_present():
+    prompt = build_question_router_prompt(
+        _schema_registry(),
+        'pod-001???????',
+        anchor_resolution_payload={
+            'raw_anchor_text': 'pod-001',
+            'match_stage': 'light',
+            'selected': {
+                'entity': 'PoD',
+                'attribute': 'pod_id',
+                'value': 'POD-001',
+            },
+            'candidates': [
+                {
+                    'entity': 'PoD',
+                    'attribute': 'pod_id',
+                    'value': 'POD-001',
+                }
+            ],
+        },
+    )
+
+    assert 'Anchor resolution payload:' in prompt
+    assert '"raw_anchor_text": "pod-001"' in prompt
+    assert '"match_stage": "light"' in prompt
+    assert '"value": "POD-001"' in prompt

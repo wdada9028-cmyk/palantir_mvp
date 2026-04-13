@@ -110,6 +110,7 @@ def build_question_router_prompt(
     raw_query: str,
     *,
     schema_markdown: str = '',
+    anchor_resolution_payload: dict[str, object] | None = None,
 ) -> str:
     schema_payload = {
         entity_name: {
@@ -162,6 +163,8 @@ def build_question_router_prompt(
         'Controlled payload:',
         json.dumps(payload, ensure_ascii=False, indent=2),
     ]
+    if anchor_resolution_payload:
+        sections.extend(['Anchor resolution payload:', json.dumps(anchor_resolution_payload, ensure_ascii=False, indent=2)])
     if schema_markdown.strip():
         sections.extend(['Schema markdown:', schema_markdown.strip()])
     return '\\n\\n'.join(sections)
@@ -173,6 +176,7 @@ def resolve_question_route(
     schema_registry: SchemaRegistry,
     *,
     schema_markdown: str = '',
+    anchor_resolution_payload: dict[str, object] | None = None,
     timeout_s: float = _DEFAULT_TIMEOUT_S,
 ) -> QuestionRoute | None:
     config = _load_config()
@@ -191,7 +195,12 @@ def resolve_question_route(
                 },
                 {
                     'role': 'user',
-                    'content': build_question_router_prompt(schema_registry, raw_query, schema_markdown=schema_markdown),
+                    'content': build_question_router_prompt(
+                        schema_registry,
+                        raw_query,
+                        schema_markdown=schema_markdown,
+                        anchor_resolution_payload=anchor_resolution_payload,
+                    ),
                 },
             ],
             timeout=timeout_s,

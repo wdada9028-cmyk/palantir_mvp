@@ -367,3 +367,77 @@ def test_instance_qa_stream_anchor_only_trace_message_is_clean(tmp_path: Path, m
     assert anchor_payload['message'] == '\u5df2\u8bc6\u522b\u951a\u70b9\u5b9e\u4f53'
     assert '?' not in anchor_payload['message']
 
+
+
+def test_instance_qa_stream_passes_anchor_resolution_payload_into_router(tmp_path: Path, monkeypatch):
+    input_file = tmp_path / 'ontology.md'
+    input_file.write_text(
+        """# Test Ontology
+
+## Object Types
+
+### `PoD`
+PoD
+Attributes:
+- `pod_id`: PoD ID
+- `pod_status`: PoD status
+
+## Link Types
+- `PoD HAS PoD`: PoD self relation
+""",
+        encoding='utf-8',
+    )
+
+    import cloud_delivery_ontology_palantir.instance_qa.orchestrator as orch
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import AnchorLocator, QuestionRoute
+
+    anchor_resolution_payload = {
+        'raw_anchor_text': 'pod-001',
+        'match_stage': 'light',
+        'selected': {
+            'entity': 'PoD',
+            'attribute': 'pod_id',
+            'value': 'POD-001',
+        },
+        'candidates': [
+            {
+                'entity': 'PoD',
+                'attribute': 'pod_id',
+                'value': 'POD-001',
+            }
+        ],
+    }
+
+    def fake_resolve_question_route(*args, **kwargs):
+        assert kwargs['anchor_resolution_payload'] == anchor_resolution_payload
+        return QuestionRoute(
+            intent='attribute_lookup',
+            anchor_entity='PoD',
+            anchor_locator=AnchorLocator(match_type='key_attribute', attribute='pod_id', value='POD-001'),
+            target_attributes=['pod_status'],
+            reasoning_scope='anchor_only',
+            confidence=0.98,
+            why='anchor resolution payload selected POD-001',
+        )
+
+    def fake_run_typeql_readonly(typeql: str):
+        if '$root isa pod;' in typeql and '$root has pod-id "POD-001";' in typeql:
+            return ([{'_entity': 'PoD', 'pod_id': 'POD-001', 'pod_status': 'Installing'}], None)
+        return ([], None)
+
+    monkeypatch.setattr(orch, '_resolve_anchor_resolution_payload', lambda question, schema_registry: anchor_resolution_payload)
+    monkeypatch.setattr(orch, 'resolve_question_route', fake_resolve_question_route)
+    monkeypatch.setattr(orch, 'validate_question_route', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, 'validate_question_dsl', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, 'validate_fact_query_dsl', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, '_run_typeql_readonly', fake_run_typeql_readonly)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'pod-001???????'})
+
+    assert response.status_code == 200
+    question_payload = _event_payloads(response.text, 'question_dsl')[0]
+    assert question_payload['question_dsl']['anchor']['entity'] == 'PoD'
+    assert question_payload['question_dsl']['anchor']['identifier'] == {'attribute': 'pod_id', 'value': 'POD-001'}
+    assert question_payload['question_dsl']['reasoning_scope'] == 'anchor_only'
