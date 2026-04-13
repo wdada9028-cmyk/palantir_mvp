@@ -142,6 +142,7 @@ def build_interactive_graph_html(graph: OntologyGraph, title: str = 'Interactive
     .trace-dimmed { opacity: 0.38; }
     .evidence-timeline button { width: 100%; text-align: left; }
     .qa-answer-text { min-height: 72px; line-height: 1.7; font-size: 15px; color: #f8fafc; white-space: pre-wrap; }
+    .qa-answer-inline-entity { display: inline-flex; align-items: center; padding: 0 8px; border-radius: 999px; background: rgba(59,130,246,0.18); border: 1px solid rgba(147,197,253,0.28); color: #dbeafe; font-weight: 700; }
     .qa-tabs { display: flex; gap: 8px; margin-top: 12px; }
     .qa-tab { border: 1px solid rgba(148,163,184,0.35); background: rgba(15,23,42,0.65); color: #cbd5e1; border-radius: 10px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
     .qa-tab.active { background: linear-gradient(135deg, #2563eb, #7c3aed); color: #fff; border-color: transparent; }
@@ -489,9 +490,16 @@ window.cytoscape = window.cytoscape || cytoscape;
       qaAnswerMode.textContent = used_fallback ? '基础回答' : 'AI总结';
     }
 
+    function formatQaAnswer(message) {
+      const safe = escapeHtml(String(message || ''));
+      return safe
+        .replace(/\\*\\*([^*]+)\\*\\*/g, '<span class="qa-answer-inline-entity">$1</span>')
+        .replace(/\\r?\\n/g, '<br />');
+    }
+
     function setQaAnswer(message) {
       qaAnswerCard.classList.remove('hidden');
-      qaAnswerText.innerHTML = escapeHtml(message || '');
+      qaAnswerText.innerHTML = formatQaAnswer(message);
     }
 
     function resetQaSummaryPanels() {
@@ -702,6 +710,8 @@ window.cytoscape = window.cytoscape || cytoscape;
       cy.elements().removeClass('highlighted');
       cy.elements().removeClass('dimmed');
       if (playbackController) {
+        playbackController.traceProtocolSeen = false;
+        playbackController.instanceQaProtocolSeen = false;
         playbackController.currentSnapshot = null;
       }
       if (shouldResetInputs) {
@@ -742,8 +752,6 @@ window.cytoscape = window.cytoscape || cytoscape;
       if (playbackController) {
         playbackController.queue = [];
         playbackController.running = false;
-        playbackController.traceProtocolSeen = false;
-        playbackController.instanceQaProtocolSeen = false;
         playbackController.currentSnapshot = null;
       }
     }
@@ -1082,7 +1090,6 @@ window.cytoscape = window.cytoscape || cytoscape;
         reason: '',
       })));
     }
-
     function buildSchemaRetrievalPlaybackSteps(questionDsl, evidenceBundle) {
       const steps = [];
       const anchor = questionDsl && typeof questionDsl === 'object' && questionDsl.anchor && typeof questionDsl.anchor === 'object'
@@ -1103,8 +1110,8 @@ window.cytoscape = window.cytoscape || cytoscape;
         steps.push({
           evidence_id: 'schema:anchor',
           kind: 'schema_retrieval',
-          label: '\u8bc6\u522b\u951a\u70b9\u5b9e\u4f53',
-          message: `\u4ece ${anchorEntity} \u5f00\u59cb\u68c0\u7d22\u76f8\u5173\u672c\u4f53\u5b9e\u4f53`,
+          label: '识别锚点实体',
+          message: `从 ${anchorEntity} 开始检索相关本体实体`,
           node_ids: findNodeIdsForEntityNames([anchorEntity]),
           edge_ids: [],
           why_matched: [],
@@ -1118,8 +1125,8 @@ window.cytoscape = window.cytoscape || cytoscape;
         steps.push({
           evidence_id: `schema:expand:${index + 1}`,
           kind: 'schema_retrieval',
-          label: `\u6269\u5c55\u5230 ${triple.target}`,
-          message: `${triple.source} \u901a\u8fc7 ${triple.relation} \u5173\u8054\u5230 ${triple.target}`,
+          label: `扩展到 ${triple.target}`,
+          message: `${triple.source} 通过 ${triple.relation} 关联到 ${triple.target}`,
           node_ids: findNodeIdsForEntityNames(cumulativeEntities),
           edge_ids: findEdgeIdsForRelationTriples(cumulativeTriples),
           why_matched: whyMatched,
@@ -1133,8 +1140,8 @@ window.cytoscape = window.cytoscape || cytoscape;
         steps.push({
           evidence_id: 'schema:final',
           kind: 'schema_retrieval',
-          label: '\u6700\u7ec8\u5b9a\u4f4d\u5b50\u56fe',
-          message: finalEntities.length ? `\u6700\u7ec8\u5b9a\u4f4d\u5230 ${finalEntities.join('\u3001')}` : '\u6700\u7ec8\u5b9a\u4f4d\u5230\u76f8\u5173\u672c\u4f53\u5b50\u56fe',
+          label: '最终定位子图',
+          message: finalEntities.length ? `最终定位到 ${finalEntities.join('、')}` : '最终定位到相关本体子图',
           node_ids: finalNodeIds,
           edge_ids: finalEdgeIds,
           why_matched: [],
@@ -1250,8 +1257,6 @@ window.cytoscape = window.cytoscape || cytoscape;
         this.queue = [];
         this.running = false;
         this.timers = [];
-        this.traceProtocolSeen = false;
-        this.instanceQaProtocolSeen = false;
         this.currentSnapshot = null;
       }
 

@@ -89,24 +89,25 @@ async def iter_qa_events(result: InstanceQAResult) -> AsyncIterator[str]:
     })
 
     final_result: GeneratorResult | None = None
-    async for chunk in iter_generated_instance_answer(
-        result.question,
-        schema_summary={'entities': list(result.fact_pack.get('instances', {}).keys())},
-        fact_pack=result.fact_pack,
-        reasoning_result=result.reasoning,
-        llm_answer_context=result.llm_answer_context,
-        fallback_answer=result.fallback_answer,
-    ):
-        if isinstance(chunk, GeneratorChunk):
-            step += 1
-            yield sse_event('answer_delta', {
-                'session_id': session_id,
-                'step': step,
-                'delta': chunk.delta,
-                'answer_text_so_far': chunk.answer_text_so_far,
-            })
-        else:
-            final_result = chunk
+    if result.question_validation_error is None:
+        async for chunk in iter_generated_instance_answer(
+            result.question,
+            schema_summary={'entities': list(result.fact_pack.get('instances', {}).keys())},
+            fact_pack=result.fact_pack,
+            reasoning_result=result.reasoning,
+            llm_answer_context=result.llm_answer_context,
+            fallback_answer=result.fallback_answer,
+        ):
+            if isinstance(chunk, GeneratorChunk):
+                step += 1
+                yield sse_event('answer_delta', {
+                    'session_id': session_id,
+                    'step': step,
+                    'delta': chunk.delta,
+                    'answer_text_so_far': chunk.answer_text_so_far,
+                })
+            else:
+                final_result = chunk
 
     if final_result is None:
         final_result = GeneratorResult(answer_text=result.fallback_answer.answer, used_fallback=True)
@@ -148,7 +149,7 @@ def _build_schema_trace_events(result: InstanceQAResult, *, session_id: str, sta
         events.append(sse_event('trace_anchor', {
             'session_id': session_id,
             'step': step,
-            'message': '?????????',
+            'message': '\u5df2\u8bc6\u522b\u951a\u70b9\u5b9e\u4f53',
             'node_ids': seed_node_ids,
             'edge_ids': [],
             'snapshot_node_ids': seed_node_ids,
@@ -161,7 +162,7 @@ def _build_schema_trace_events(result: InstanceQAResult, *, session_id: str, sta
         events.append(sse_event('trace_expand', {
             'session_id': session_id,
             'step': step,
-            'message': f'? {item.relation} ???????',
+            'message': f'\u6cbf {item.relation} \u6269\u5c55\u5230\u76f8\u5173\u5b9e\u4f53',
             'node_ids': [item.to_node_id],
             'edge_ids': [item.edge_id],
             'snapshot_node_ids': list(item.snapshot_node_ids),
@@ -174,7 +175,7 @@ def _build_schema_trace_events(result: InstanceQAResult, *, session_id: str, sta
         events.append(sse_event('evidence_final', {
             'session_id': session_id,
             'step': step,
-            'message': '??????????????',
+            'message': '\u5df2\u5b8c\u6210\u672c\u4f53\u68c0\u7d22\u5b9a\u4f4d',
             'evidence_chain': [item.to_dict() for item in bundle.evidence_chain],
             'search_trace': bundle.search_trace.to_dict(),
         }))
@@ -187,6 +188,8 @@ def _build_schema_trace_events(result: InstanceQAResult, *, session_id: str, sta
 def _question_to_dict(question) -> dict[str, object]:
     return {
         'mode': question.mode,
+        'reasoning_scope': question.reasoning_scope,
+        'target_attributes': list(question.target_attributes),
         'anchor': {
             'entity': question.anchor.entity,
             'identifier': (

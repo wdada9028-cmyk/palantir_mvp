@@ -195,56 +195,296 @@ def build_instance_template_answer(question: str, fact_pack: dict[str, object], 
 
     summary = reasoning_result.get('summary', {}) if isinstance(reasoning_result, dict) else {}
     deadline_assessment = reasoning_result.get('deadline_assessment', {}) if isinstance(reasoning_result, dict) else {}
-    impact_summary = reasoning_result.get('impact_summary', {}) if isinstance(reasoning_result, dict) else {}
+    metadata = fact_pack.get('metadata') if isinstance(fact_pack, dict) else {}
+    if not isinstance(metadata, dict):
+        metadata = {}
+    target_attributes = metadata.get('target_attributes') if isinstance(metadata.get('target_attributes'), list) else []
+    anchor = metadata.get('anchor') if isinstance(metadata.get('anchor'), dict) else {}
+
+    if target_attributes and instance_count > 0:
+        anchor_entity = str(anchor.get('entity') or '').strip()
+        rows = instances.get(anchor_entity) if isinstance(instances, dict) else None
+        if isinstance(rows, list) and rows:
+            row = rows[0] if isinstance(rows[0], dict) else {}
+            attribute = str(target_attributes[0])
+            value = row.get(attribute) if isinstance(row, dict) else None
+            identifier = str(anchor.get('id') or '').strip() or str((anchor.get('identifier') or {}).get('value') or '').strip()
+            if value is not None and str(value).strip():
+                if attribute.endswith('_status'):
+                    return TemplateAnswer(answer=f'{identifier or question} \u5f53\u524d\u72b6\u6001\u4e3a {value}\u3002', insufficient_evidence=False)
+                return TemplateAnswer(answer=f'{identifier or question} \u7684 {attribute} \u4e3a {value}\u3002', insufficient_evidence=False)
 
     if summary.get('answer_type') == 'deadline_risk':
         at_risk = bool(deadline_assessment.get('at_risk'))
         deadline = str(deadline_assessment.get('deadline') or '').strip() or '\u76ee\u6807\u65e5\u671f'
         supporting = deadline_assessment.get('supporting_facts') or []
         if at_risk:
-            detail = f"\u4e3b\u8981\u4f9d\u636e\uff1a{supporting[0]}\u3002" if supporting else ''
+            detail = f'\u4e3b\u8981\u4f9d\u636e\uff1a{supporting[0]}\u3002' if supporting else ''
             return TemplateAnswer(
-                answer=f"\u5224\u65ad\u7ed3\u679c\uff1a\u95ee\u9898\u201c{question}\u201d\u53ef\u80fd\u5f71\u54cd {deadline} \u4ea4\u4ed8\u3002{detail}",
+                answer=f'\u95ee\u9898\u201c{question}\u201d\u53ef\u80fd\u5f71\u54cd {deadline} \u4ea4\u4ed8\u3002{detail}',
                 insufficient_evidence=False,
             )
         return TemplateAnswer(
-            answer=f"\u5224\u65ad\u7ed3\u679c\uff1a\u5f53\u524d\u8bc1\u636e\u663e\u793a\u95ee\u9898\u201c{question}\u201d\u6682\u672a\u5f71\u54cd {deadline} \u4ea4\u4ed8\u3002",
+            answer=f'\u5f53\u524d\u8bc1\u636e\u663e\u793a\u95ee\u9898\u201c{question}\u201d\u6682\u672a\u5f71\u54cd {deadline} \u4ea4\u4ed8\u3002',
             insufficient_evidence=False,
         )
 
     if instance_count <= 0:
         return TemplateAnswer(
-            answer=f"\u8bc1\u636e\u4e0d\u8db3\uff1a\u5f53\u524d\u672a\u68c0\u7d22\u5230\u4e0e\u201c{question}\u201d\u76f4\u63a5\u76f8\u5173\u7684\u5b9e\u4f8b\u6570\u636e\u3002",
+            answer=f'\u8bc1\u636e\u4e0d\u8db3\uff1a\u5f53\u524d\u672a\u68c0\u7d22\u5230\u4e0e\u201c{question}\u201d\u76f4\u63a5\u76f8\u5173\u7684\u5b9e\u4f8b\u6570\u636e\u3002',
             insufficient_evidence=True,
         )
 
-    direct_counts = impact_summary.get('direct_counts') if isinstance(impact_summary, dict) else {}
-    propagated_counts = impact_summary.get('propagated_counts') if isinstance(impact_summary, dict) else {}
-    if (isinstance(direct_counts, dict) and direct_counts) or (isinstance(propagated_counts, dict) and propagated_counts):
-        parts: list[str] = ['\u5df2\u8bc6\u522b\u4ee5\u4e0b\u6f5c\u5728\u5f71\u54cd\uff1a']
-        if isinstance(direct_counts, dict) and direct_counts:
-            parts.append(f"\u76f4\u63a5\u5f71\u54cd\uff1a{_format_impact_counts(direct_counts)}\u3002")
-        if isinstance(propagated_counts, dict) and propagated_counts:
-            parts.append(f"\u4f20\u64ad\u5f71\u54cd\uff1a{_format_impact_counts(propagated_counts)}\u3002")
-        parts.append('\u5efa\u8bae\u4f18\u5148\u6838\u67e5\u65bd\u5de5\u5206\u914d\u3001\u76f8\u5173PoD\u3001\u65bd\u5de5\u6d3b\u52a8\u4e0ePoD\u6392\u671f\u3002')
-        return TemplateAnswer(answer=''.join(parts), insufficient_evidence=False)
+    links = _instance_links(fact_pack)
+    anchor_entity = str(anchor.get('entity') or '').strip()
+    anchor_id = str(anchor.get('id') or '').strip()
 
-    affected = reasoning_result.get('affected_entities') if isinstance(reasoning_result, dict) else []
-    affected_count = len(affected) if isinstance(affected, list) else 0
+    if links and anchor_entity and anchor_id and _looks_like_relation_question(question):
+        return TemplateAnswer(
+            answer=_build_relation_instance_summary(anchor_entity, anchor_id, links),
+            insufficient_evidence=False,
+        )
+
+    if _looks_like_impact_question(question):
+        return TemplateAnswer(
+            answer=_build_impact_instance_summary(question, anchor_entity, anchor_id, instances, links),
+            insufficient_evidence=False,
+        )
+
     return TemplateAnswer(
-        answer=f"\u5df2\u8bc6\u522b\u6f5c\u5728\u53d7\u5f71\u54cd\u5bf9\u8c61 {affected_count or instance_count} \u4e2a\uff0c\u5efa\u8bae\u4f18\u5148\u6838\u67e5\u5173\u952e\u8def\u5f84\u4efb\u52a1\u3002",
+        answer=_build_instance_overview_summary(question, anchor_entity, anchor_id, instances, links),
         insufficient_evidence=False,
     )
 
 
-def _format_impact_counts(counts: dict[str, object]) -> str:
-    parts: list[str] = []
-    for entity, value in counts.items():
-        try:
-            count = int(value)
-        except Exception:
-            count = 0
-        if count <= 0:
+_ENTITY_LABELS = {
+    'Room': '\u673a\u623f',
+    'Floor': '\u697c\u5c42',
+    'PoD': 'PoD',
+    'PoDPosition': 'PoD\u843d\u4f4d',
+    'ActivityInstance': '\u6d3b\u52a8\u5b9e\u4f8b',
+    'RoomMilestone': '\u673a\u623f\u91cc\u7a0b\u7891',
+    'WorkAssignment': '\u65bd\u5de5\u5206\u914d',
+    'Project': '\u9879\u76ee',
+}
+
+_STATUS_KEYS = ('room_status', 'pod_status', 'activity_status', 'milestone_status', 'position_status', 'project_status')
+_TIME_KEYS = ('due_time', 'planned_start_time', 'planned_finish_time', 'latest_finish_time', 'assignment_date')
+_TARGET_KEYS = ('target_pod_count', 'required_handover_pod_count', 'max_pod_capacity')
+
+
+def _instance_links(fact_pack: dict[str, object]) -> list[dict[str, str]]:
+    raw = fact_pack.get('links') if isinstance(fact_pack, dict) else None
+    if not isinstance(raw, list):
+        return []
+    result: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
             continue
-        parts.append(f'{entity} {count} \u4e2a')
-    return '\u3001'.join(parts) if parts else '\u65e0'
+        try:
+            result.append(
+                {
+                    'source_entity': str(item['source_entity']),
+                    'source_id': str(item['source_id']),
+                    'relation': str(item['relation']),
+                    'target_entity': str(item['target_entity']),
+                    'target_id': str(item['target_id']),
+                }
+            )
+        except Exception:
+            continue
+    return result
+
+
+def _looks_like_relation_question(question: str) -> bool:
+    text = str(question or '')
+    return any(token in text for token in ('\u5173\u7cfb', '\u5173\u8054', '\u76f8\u5173', '\u8fde\u63a5'))
+
+
+def _looks_like_impact_question(question: str) -> bool:
+    text = str(question or '')
+    return any(token in text for token in ('\u5f71\u54cd', '\u98ce\u9669', '\u65ad\u7535', '\u505c\u7535', '\u706b\u707e', '\u5ef6\u671f', '\u5ef6\u8bef', '\u63a8\u8fdf'))
+
+
+def _build_relation_instance_summary(anchor_entity: str, anchor_id: str, links: list[dict[str, str]]) -> str:
+    related = _collect_direct_neighbors(anchor_entity, anchor_id, links)
+    if not related:
+        return f'{anchor_id or anchor_entity} \u5f53\u524d\u672a\u68c0\u7d22\u5230\u76f4\u63a5\u5173\u8054\u7684\u5b9e\u4f8b\u3002'
+
+    grouped: dict[str, list[str]] = {}
+    for entity, instance_id in related:
+        grouped.setdefault(entity, []).append(instance_id)
+
+    segments: list[str] = []
+    for entity, ids in grouped.items():
+        label = _ENTITY_LABELS.get(entity, entity)
+        segments.append(f'{label} {_join_labels(ids)}')
+    return f'{anchor_id} \u5f53\u524d\u76f4\u63a5\u5173\u8054\u7684\u5b9e\u4f8b\u5305\u62ec {_join_clauses(segments)}\u3002'
+
+
+def _build_impact_instance_summary(question: str, anchor_entity: str, anchor_id: str, instances: object, links: list[dict[str, str]]) -> str:
+    clauses: list[str] = []
+
+    anchor_row = _find_instance_row(instances, anchor_entity, anchor_id)
+    anchor_profile = _describe_instance(anchor_entity, anchor_id, anchor_row)
+    if anchor_profile:
+        clauses.append(anchor_profile)
+
+    for row in _instance_rows(instances, 'PoD')[:3]:
+        pod_id = _instance_identifier('PoD', row)
+        status = _first_present(row, _STATUS_KEYS)
+        position = _linked_neighbor_ids('PoD', pod_id, 'PoDPosition', links)
+        if status and position:
+            clauses.append(f'{pod_id} \u5f53\u524d\u72b6\u6001\u4e3a {status}\uff0c\u5df2\u5173\u8054\u843d\u4f4d {_join_labels(position)}')
+        elif status:
+            clauses.append(f'{pod_id} \u5f53\u524d\u72b6\u6001\u4e3a {status}')
+
+    for row in _instance_rows(instances, 'ActivityInstance')[:3]:
+        activity_id = _instance_identifier('ActivityInstance', row)
+        status = _first_present(row, _STATUS_KEYS)
+        if status:
+            clauses.append(f'{activity_id} \u5f53\u524d\u72b6\u6001\u4e3a {status}')
+
+    for row in _instance_rows(instances, 'RoomMilestone')[:2]:
+        milestone_id = _instance_identifier('RoomMilestone', row)
+        status = _first_present(row, _STATUS_KEYS)
+        due_time = _first_present(row, _TIME_KEYS)
+        target = _first_present(row, _TARGET_KEYS)
+        details = []
+        if status:
+            details.append(f'\u72b6\u6001\u4e3a {status}')
+        if target:
+            details.append(f'\u76ee\u6807\u503c\u4e3a {target}')
+        if due_time:
+            details.append(f'\u622a\u6b62\u65f6\u95f4\u4e3a {due_time}')
+        if details:
+            clauses.append(f'{milestone_id} ' + '\uff0c'.join(details))
+
+    clauses = _dedupe_preserve_order([item for item in clauses if item])
+    if not clauses:
+        return f'{question}\uff0c\u5f53\u524d\u5df2\u68c0\u7d22\u5230\u76f8\u5173\u5b9e\u4f8b\uff0c\u4f46\u81ea\u52a8\u6458\u8981\u672a\u63d0\u70bc\u51fa\u5173\u952e\u4e1a\u52a1\u70b9\u3002'
+
+    intro = f'{anchor_id or anchor_entity} \u5bf9\u5e94\u95ee\u9898\u201c{question}\u201d\u7684\u5173\u952e\u5f71\u54cd\u96c6\u4e2d\u5728\u4ee5\u4e0b\u5b9e\u4f8b\uff1a'
+    return intro + '\uff1b'.join(clauses) + '\u3002'
+
+
+def _build_instance_overview_summary(question: str, anchor_entity: str, anchor_id: str, instances: object, links: list[dict[str, str]]) -> str:
+    anchor_row = _find_instance_row(instances, anchor_entity, anchor_id)
+    profile = _describe_instance(anchor_entity, anchor_id, anchor_row)
+    neighbors = _collect_direct_neighbors(anchor_entity, anchor_id, links)
+    if neighbors:
+        grouped: dict[str, list[str]] = {}
+        for entity, instance_id in neighbors:
+            grouped.setdefault(entity, []).append(instance_id)
+        neighbor_segments = [f'{_ENTITY_LABELS.get(entity, entity)} {_join_labels(ids)}' for entity, ids in grouped.items()]
+        if profile:
+            return profile + '\uff1b\u5f53\u524d\u76f4\u63a5\u5173\u8054 ' + _join_clauses(neighbor_segments) + '\u3002'
+        return f'{anchor_id or anchor_entity} \u5f53\u524d\u76f4\u63a5\u5173\u8054 {_join_clauses(neighbor_segments)}\u3002'
+    if profile:
+        return profile + '\u3002'
+    return f'{question}\uff0c\u5f53\u524d\u5df2\u68c0\u7d22\u5230\u76f8\u5173\u5b9e\u4f8b\uff0c\u4f46\u672a\u6574\u7406\u51fa\u66f4\u5b8c\u6574\u7684\u5b9e\u4f8b\u753b\u50cf\u3002'
+
+
+def _describe_instance(entity: str, instance_id: str, row: dict[str, object] | None) -> str:
+    if not instance_id:
+        return ''
+    label = _ENTITY_LABELS.get(entity, entity)
+    if not isinstance(row, dict):
+        return f'{label} {instance_id}'
+    details: list[str] = []
+    status = _first_present(row, _STATUS_KEYS)
+    if status:
+        details.append(f'\u72b6\u6001\u4e3a {status}')
+    for key in _TARGET_KEYS:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            details.append(f'{key}={value}')
+            break
+    for key in _TIME_KEYS:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            details.append(f'{key}={value}')
+            break
+    if details:
+        return f'{label} {instance_id} ' + '\uff0c'.join(details)
+    return f'{label} {instance_id}'
+
+
+def _collect_direct_neighbors(anchor_entity: str, anchor_id: str, links: list[dict[str, str]]) -> list[tuple[str, str]]:
+    neighbors: list[tuple[str, str]] = []
+    for link in links:
+        if link['source_entity'] == anchor_entity and link['source_id'] == anchor_id:
+            neighbors.append((link['target_entity'], link['target_id']))
+        elif link['target_entity'] == anchor_entity and link['target_id'] == anchor_id:
+            neighbors.append((link['source_entity'], link['source_id']))
+    deduped: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in neighbors:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
+
+
+def _linked_neighbor_ids(anchor_entity: str, anchor_id: str, neighbor_entity: str, links: list[dict[str, str]]) -> list[str]:
+    values: list[str] = []
+    for entity, instance_id in _collect_direct_neighbors(anchor_entity, anchor_id, links):
+        if entity == neighbor_entity:
+            values.append(instance_id)
+    return _dedupe_preserve_order(values)
+
+
+def _instance_rows(instances: object, entity: str) -> list[dict[str, object]]:
+    if not isinstance(instances, dict):
+        return []
+    rows = instances.get(entity)
+    if not isinstance(rows, list):
+        return []
+    return [item for item in rows if isinstance(item, dict)]
+
+
+def _find_instance_row(instances: object, entity: str, instance_id: str) -> dict[str, object] | None:
+    if not entity or not instance_id:
+        return None
+    for row in _instance_rows(instances, entity):
+        if _instance_identifier(entity, row) == instance_id:
+            return row
+    return None
+
+
+def _instance_identifier(entity_name: str, row: dict[str, object]) -> str:
+    for key in ('id', f'{entity_name.lower()}_id', 'pod_code', 'assignment_id', 'activity_id', 'pod_schedule_id', 'position_id', 'project_id', 'milestone_id', 'room_id', 'floor_id'):
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+    return ''
+
+
+def _first_present(row: dict[str, object], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ''
+
+
+def _join_labels(values: list[str]) -> str:
+    values = [str(value).strip() for value in values if str(value).strip()]
+    values = _dedupe_preserve_order(values)
+    if not values:
+        return ''
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 2:
+        return f'{values[0]} \u548c {values[1]}'
+    return '\u3001'.join(values[:-1]) + f' \u548c {values[-1]}'
+
+
+def _join_clauses(values: list[str]) -> str:
+    values = [str(value).strip() for value in values if str(value).strip()]
+    if not values:
+        return ''
+    if len(values) == 1:
+        return values[0]
+    return '\uff0c'.join(values)

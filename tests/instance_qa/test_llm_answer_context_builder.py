@@ -66,6 +66,13 @@ def test_build_llm_answer_context_contains_compact_payload_and_constraints():
     assert '只能依据提供的证据回答' in context.system_prompt
     assert 'full-row' in context.evidence_contract_prompt
     assert 'iid' in context.evidence_contract_prompt
+    assert '1~2 段自然语言' in context.task_prompt
+    assert '必须直接回答用户问题' in context.task_prompt
+    assert '关键实例 ID' in context.task_prompt
+    assert '状态、时间、目标值' in context.task_prompt
+    assert '不要输出小标题' in context.style_prompt
+    assert '不要只做数量统计' in context.style_prompt
+    assert '要把实例证据和业务结论连起来' in context.style_prompt
 
     payload = context.user_payload
     assert payload['question'] == 'L1-A机房断电一周，会有哪些影响？'

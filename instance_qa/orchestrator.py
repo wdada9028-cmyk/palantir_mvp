@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from ..models.ontology import OntologyGraph
 from ..qa.template_answering import TemplateAnswer, build_instance_template_answer
 from ..search.ontology_query_engine import retrieve_ontology_evidence
-from ..search.ontology_query_models import OntologyEvidenceBundle
+from ..search.ontology_query_models import EvidenceItem, OntologyEvidenceBundle, RetrievalStep, SearchTrace
 from ..search.query_parser import parse_query
 from .evidence_bundle_builder import build_evidence_bundle
 from .evidence_models import EvidenceBundle
@@ -15,6 +15,7 @@ from .evidence_subgraph_builder import build_evidence_subgraph
 from .fact_query_planner import build_fact_queries, build_propagation_queries
 from .fact_query_validator import validate_fact_query_dsl
 from .question_models import AnchorRef, ConstraintRef, GoalRef, IdentifierRef, QuestionDSL, ScenarioRef
+from .question_router import QuestionRoute, load_schema_markdown, resolve_question_route, validate_question_route
 from .question_validator import validate_question_dsl
 from .llm_answer_context_builder import LLMAnswerContext, build_llm_answer_context
 from .reasoner import build_reasoning_result
@@ -53,9 +54,13 @@ _IDENTIFIER_FALLBACK_KEYS = ('id', 'room_id', 'floor_id', 'milestone_id', 'posit
 
 def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
     schema_registry = build_schema_registry(graph)
-    schema_retrieval_bundle = retrieve_ontology_evidence(graph, question)
     parsed = parse_query(question)
-    question_dsl = _build_question_dsl(question, parsed.normalized_query, schema_registry)
+    route = resolve_question_route(question, schema_registry, schema_markdown=_load_router_schema_markdown(graph))
+    question_dsl = _build_question_dsl(question, parsed.normalized_query, schema_registry, route=route)
+    if question_dsl.reasoning_scope == 'anchor_only':
+        schema_retrieval_bundle = _build_anchor_only_schema_bundle(graph, question_dsl, question)
+    else:
+        schema_retrieval_bundle = retrieve_ontology_evidence(graph, question)
     question_validation_error = validate_question_dsl(question_dsl, schema_registry)
 
     fact_query_records: list[dict[str, object]] = []
@@ -98,6 +103,8 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
             'fact_query_count': len(fact_query_records),
             'question_validation_error': question_validation_error,
             'anchor': _build_anchor_metadata(question_dsl.anchor),
+            'reasoning_scope': question_dsl.reasoning_scope,
+            'target_attributes': list(question_dsl.target_attributes),
         }
     )
 
@@ -198,6 +205,72 @@ def _row_identifier(row: dict[str, object], entity_schema: SchemaEntity | None) 
     return None
 
 
+def _build_anchor_only_schema_bundle(graph: OntologyGraph, question_dsl: QuestionDSL, question: str) -> OntologyEvidenceBundle:
+    object_id = f"object_type:{question_dsl.anchor.entity}"
+    obj = graph.get_object(object_id)
+    seed_node_ids = [object_id] if obj is not None else []
+    display_name_map = {}
+    if obj is not None:
+        english_name = str(obj.name or question_dsl.anchor.entity).strip() or question_dsl.anchor.entity
+        chinese_name = str(obj.attributes.get('chinese_description', '') or '').strip()
+        display_name_map[object_id] = f'{chinese_name}({english_name})' if chinese_name and chinese_name != english_name else english_name
+    evidence_chain = []
+    if seed_node_ids:
+        evidence_chain.append(
+            EvidenceItem(
+                evidence_id='E1',
+                kind='seed',
+                label=question_dsl.anchor.entity,
+                message=f'\u5df2\u8bc6\u522b\u951a\u70b9\u5b9e\u4f53 {question_dsl.anchor.entity}',
+                node_ids=list(seed_node_ids),
+                why_matched=['\u5c5e\u6027\u67e5\u8be2\u4ec5\u9501\u5b9a\u951a\u70b9\u5b9e\u4f53'],
+            )
+        )
+    return OntologyEvidenceBundle(
+        question=question,
+        seed_node_ids=list(seed_node_ids),
+        matched_node_ids=list(seed_node_ids),
+        matched_edge_ids=[],
+        highlight_steps=(
+            [RetrievalStep(action='anchor_node', message='\u5df2\u8bc6\u522b\u951a\u70b9\u5b9e\u4f53', node_ids=list(seed_node_ids), edge_ids=[], evidence_ids=['E1'])]
+            if seed_node_ids
+            else []
+        ),
+        evidence_chain=evidence_chain,
+        insufficient_evidence=not bool(seed_node_ids),
+        search_trace=SearchTrace(
+            seed_node_ids=list(seed_node_ids),
+            seed_resolution_source='question_router',
+            seed_resolution_reasoning='attribute_lookup -> anchor_only',
+            seed_resolution_error='',
+            expansion_steps=[],
+        ),
+        display_name_map=display_name_map,
+        relation_name_map={},
+    )
+
+
+
+
+def _load_router_schema_markdown(graph: OntologyGraph) -> str:
+    source_file = str(graph.metadata.get('source_file') or '').strip()
+    if source_file:
+        schema_markdown = load_schema_markdown(source_file)
+        if schema_markdown:
+            return schema_markdown
+
+    typedb_input_file = str(graph.metadata.get('typedb_schema_input_file') or '').strip()
+    if typedb_input_file:
+        from ..pipelines.input_file_resolver import resolve_input_to_markdown
+
+        try:
+            resolved = resolve_input_to_markdown(typedb_input_file)
+        except Exception:
+            return ''
+        return load_schema_markdown(resolved)
+    return ''
+
+
 def _run_typeql_readonly(typeql: str) -> tuple[list[dict[str, object]], str | None]:
     config = load_typedb_config()
     if config is None:
@@ -214,8 +287,10 @@ def _run_typeql_readonly(typeql: str) -> tuple[list[dict[str, object]], str | No
         client.close()
 
 
-def _build_question_dsl(question: str, normalized_query: str, schema_registry: SchemaRegistry) -> QuestionDSL:
+def _build_question_dsl(question: str, normalized_query: str, schema_registry: SchemaRegistry, *, route: QuestionRoute | None = None) -> QuestionDSL:
     parsed = parse_query(normalized_query)
+    if route is not None and validate_question_route(route, schema_registry) is None:
+        return _build_question_dsl_from_route(question, normalized_query, route)
     anchor_entity = next(iter(schema_registry.entities), 'Room')
     for candidate in [*parsed.high_confidence_entities, *parsed.candidate_entities]:
         if candidate in schema_registry.entities:
@@ -244,6 +319,39 @@ def _build_question_dsl(question: str, normalized_query: str, schema_registry: S
             deadline=deadline,
         ),
         constraints=ConstraintRef(statuses=[], time_window=None, limit=20),
+    )
+
+
+def _build_question_dsl_from_route(question: str, normalized_query: str, route: QuestionRoute) -> QuestionDSL:
+    deadline = _extract_deadline(normalized_query)
+    event_type = _detect_event_type(normalized_query)
+    if route.intent == 'impact_analysis':
+        mode = 'impact_analysis'
+        goal_type = 'list_impacts'
+    elif route.intent == 'attribute_lookup':
+        mode = 'fact_lookup'
+        goal_type = 'instance_lookup'
+    else:
+        mode = _detect_mode(normalized_query, deadline, event_type)
+        goal_type = 'yes_no_risk' if mode == 'deadline_risk_check' else ('list_impacts' if mode == 'impact_analysis' else 'instance_lookup')
+
+    identifier = None
+    if route.anchor_locator.attribute and route.anchor_locator.value:
+        identifier = IdentifierRef(attribute=route.anchor_locator.attribute, value=route.anchor_locator.value)
+
+    return QuestionDSL(
+        mode=mode,
+        anchor=AnchorRef(entity=route.anchor_entity, identifier=identifier, surface=question),
+        scenario=ScenarioRef(event_type=event_type, duration=None, start_time=None, severity=None, raw_event=''),
+        goal=GoalRef(
+            type=goal_type,
+            target_entity=None,
+            target_metric='delivery' if mode == 'deadline_risk_check' else None,
+            deadline=deadline,
+        ),
+        constraints=ConstraintRef(statuses=[], time_window=None, limit=20),
+        reasoning_scope=route.reasoning_scope,
+        target_attributes=list(route.target_attributes),
     )
 
 
@@ -312,6 +420,8 @@ def _build_evidence_understanding(question: QuestionDSL, normalized_query: str) 
     anchor = _build_anchor_metadata(question.anchor)
     return {
         'mode': question.mode,
+        'reasoning_scope': question.reasoning_scope,
+        'target_attributes': list(question.target_attributes),
         'normalized_query': normalized_query,
         'anchor': {
             'entity': anchor.get('entity', ''),
@@ -328,6 +438,7 @@ def _build_evidence_understanding(question: QuestionDSL, normalized_query: str) 
             else None
         ),
     }
+
 
 
 def _extract_identifier_value(question: str) -> str | None:

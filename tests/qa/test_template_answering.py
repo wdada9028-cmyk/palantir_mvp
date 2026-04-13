@@ -162,26 +162,102 @@ def test_build_template_answer_keeps_insufficient_evidence_summary_user_facing()
 
 
 
-def test_build_instance_template_answer_returns_clean_chinese_impact_summary():
+def test_build_instance_template_answer_summarizes_impact_with_concrete_instances_instead_of_counts():
     fact_pack = {
         'instances': {
-            'RoomMilestone': [{'milestone_id': 'RM-1'}],
-            'Floor': [{'floor_id': 'F1'}],
-            'PoDPosition': [{'position_id': 'P1'}],
-        }
+            'Room': [{'room_id': 'L1-A', 'room_status': 'ready'}],
+            'PoD': [
+                {'pod_id': 'POD-001', 'pod_status': 'Installing'},
+                {'pod_id': 'POD-002', 'pod_status': 'ArrivedWaitingInstall'},
+            ],
+            'ActivityInstance': [
+                {'activity_id': 'ACT-002', 'activity_status': 'in-progress'},
+            ],
+            'RoomMilestone': [
+                {'milestone_id': 'RM-1', 'milestone_status': 'active', 'due_time': '2026-01-08T18:00:00'},
+            ],
+        },
+        'links': [
+            {'source_entity': 'PoD', 'source_id': 'POD-001', 'relation': 'POD_ACTIVITY', 'target_entity': 'ActivityInstance', 'target_id': 'ACT-002'},
+            {'source_entity': 'RoomMilestone', 'source_id': 'RM-1', 'relation': 'ROOM_MILESTONE_CONSTRAINT', 'target_entity': 'Room', 'target_id': 'L1-A'},
+        ],
+        'metadata': {
+            'anchor': {'entity': 'Room', 'id': 'L1-A'},
+        },
     }
     reasoning_result = {
         'summary': {'answer_type': 'impact_list'},
         'impact_summary': {
-            'direct_counts': {'RoomMilestone': 1, 'Floor': 1, 'PoDPosition': 5},
-            'propagated_counts': {'PoD': 2},
+            'direct_counts': {'RoomMilestone': 1, 'PoD': 2, 'ActivityInstance': 1},
+            'propagated_counts': {},
         },
     }
 
     answer = build_instance_template_answer('L1-A\u673a\u623f\u65ad\u7535\u4e00\u5468\uff0c\u4f1a\u6709\u54ea\u4e9b\u5f71\u54cd\uff1f', fact_pack, reasoning_result)
 
-    assert '\u5df2\u8bc6\u522b\u4ee5\u4e0b\u6f5c\u5728\u5f71\u54cd\uff1a' in answer.answer
-    assert '\u76f4\u63a5\u5f71\u54cd\uff1aRoomMilestone 1 \u4e2a\u3001Floor 1 \u4e2a\u3001PoDPosition 5 \u4e2a\u3002' in answer.answer
-    assert '\u4f20\u64ad\u5f71\u54cd\uff1aPoD 2 \u4e2a\u3002' in answer.answer
-    assert '\u5efa\u8bae\u4f18\u5148\u6838\u67e5\u65bd\u5de5\u5206\u914d\u3001\u76f8\u5173PoD\u3001\u65bd\u5de5\u6d3b\u52a8\u4e0ePoD\u6392\u671f\u3002' in answer.answer
+    assert 'POD-001' in answer.answer
+    assert 'POD-002' in answer.answer
+    assert 'ACT-002' in answer.answer
+    assert 'RM-1' in answer.answer
+    assert 'Installing' in answer.answer
+    assert 'ArrivedWaitingInstall' in answer.answer
+    assert '2026-01-08T18:00:00' in answer.answer
+    assert '\u76f4\u63a5\u5f71\u54cd\uff1a' not in answer.answer
+    assert ' 1 ?' not in answer.answer
+    assert '?' not in answer.answer
+
+
+def test_build_instance_template_answer_summarizes_relation_query_with_concrete_related_instances():
+    fact_pack = {
+        'instances': {
+            'PoD': [{'pod_id': 'POD-001', 'pod_status': 'Installing'}],
+            'WorkAssignment': [{'assignment_id': 'WA-001'}],
+            'ActivityInstance': [{'activity_id': 'ACT-001'}, {'activity_id': 'ACT-002'}],
+            'Project': [{'project_id': 'P-MEITUAN'}],
+        },
+        'links': [
+            {'source_entity': 'WorkAssignment', 'source_id': 'WA-001', 'relation': 'WORK_ASSIGNMENT_POD', 'target_entity': 'PoD', 'target_id': 'POD-001'},
+            {'source_entity': 'PoD', 'source_id': 'POD-001', 'relation': 'POD_ACTIVITY', 'target_entity': 'ActivityInstance', 'target_id': 'ACT-001'},
+            {'source_entity': 'PoD', 'source_id': 'POD-001', 'relation': 'POD_ACTIVITY', 'target_entity': 'ActivityInstance', 'target_id': 'ACT-002'},
+            {'source_entity': 'Project', 'source_id': 'P-MEITUAN', 'relation': 'PROJECT_POD', 'target_entity': 'PoD', 'target_id': 'POD-001'},
+        ],
+        'metadata': {
+            'anchor': {'entity': 'PoD', 'id': 'POD-001'},
+        },
+    }
+
+    answer = build_instance_template_answer('POD-001\u4e0e\u54ea\u4e9b\u5b9e\u4f53\u5b9e\u4f8b\u6709\u5173\u7cfb\uff1f', fact_pack, {})
+
+    assert 'WA-001' in answer.answer
+    assert 'ACT-001' in answer.answer
+    assert 'ACT-002' in answer.answer
+    assert 'P-MEITUAN' in answer.answer
+    assert '\u76f4\u63a5\u5f71\u54cd\uff1a' not in answer.answer
+    assert ' 1 ?' not in answer.answer
+
+
+def test_build_instance_template_answer_returns_clean_attribute_lookup_summary():
+    fact_pack = {
+        'instances': {
+            'PoD': [
+                {
+                    'pod_id': 'POD-001',
+                    'pod_status': 'Installing',
+                }
+            ]
+        },
+        'metadata': {
+            'anchor': {
+                'entity': 'PoD',
+                'id': 'POD-001',
+                'identifier': {'attribute': 'pod_id', 'value': 'POD-001'},
+            },
+            'target_attributes': ['pod_status'],
+        },
+    }
+
+    answer = build_instance_template_answer('POD-001\u7684\u72b6\u6001\u662f\u4ec0\u4e48\uff1f', fact_pack, {})
+
+    assert answer.answer == 'POD-001 \u5f53\u524d\u72b6\u6001\u4e3a Installing\u3002'
+    assert '*' not in answer.answer
     assert '?' not in answer.answer

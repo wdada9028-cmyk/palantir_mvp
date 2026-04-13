@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 
@@ -80,6 +80,9 @@ def build_fact_queries(question: QuestionDSL, schema_registry: SchemaRegistry) -
         )
     ]
 
+    if question.reasoning_scope == 'anchor_only':
+        return queries
+
     adjacency = list(schema_registry.adjacency.get(anchor_entity, []))
     if not adjacency:
         return queries
@@ -122,6 +125,9 @@ def build_propagation_queries(
     schema_registry: SchemaRegistry,
     seed_identifiers: dict[str, set[str]],
 ) -> list[FactQueryDSL]:
+    if question.reasoning_scope == 'anchor_only':
+        return []
+
     profile = _event_profile(question)
     impact_propagation = profile.get('impact_propagation') if isinstance(profile, dict) else {}
     if not isinstance(impact_propagation, dict):

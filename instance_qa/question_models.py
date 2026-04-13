@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 
@@ -53,3 +53,5 @@ class QuestionDSL:
     scenario: ScenarioRef | None
     goal: GoalRef
     constraints: ConstraintRef = field(default_factory=ConstraintRef)
+    reasoning_scope: str = 'expand_graph'
+    target_attributes: list[str] = field(default_factory=list)
