@@ -9,8 +9,11 @@ from ..qa.template_answering import TemplateAnswer, build_instance_template_answ
 from ..search.ontology_query_engine import retrieve_ontology_evidence
 from ..search.ontology_query_models import EvidenceItem, OntologyEvidenceBundle, RetrievalStep, SearchTrace
 from ..search.query_parser import parse_query
+from .anchor_candidate_context_builder import build_anchor_candidate_context
+from .anchor_candidate_ranker import resolve_anchor_candidate_rank
 from .anchor_candidate_resolver import resolve_anchor_candidates
 from .anchor_locator_registry import build_anchor_locator_registry
+from .anchor_resolution_policy import apply_anchor_resolution_policy
 from .evidence_bundle_builder import build_evidence_bundle
 from .evidence_models import EvidenceBundle
 from .evidence_subgraph_builder import build_evidence_subgraph
@@ -58,11 +61,16 @@ _IDENTIFIER_FALLBACK_KEYS = ('id', 'room_id', 'floor_id', 'milestone_id', 'posit
 def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
     schema_registry = build_schema_registry(graph)
     parsed = parse_query(question)
-    anchor_resolution_payload = _resolve_anchor_resolution_payload(question, schema_registry)
+    router_schema_markdown = _load_router_schema_markdown(graph)
+    anchor_resolution_payload = _resolve_anchor_resolution_payload(
+        question,
+        schema_registry,
+        schema_markdown=router_schema_markdown,
+    )
     route = resolve_question_route(
         question,
         schema_registry,
-        schema_markdown=_load_router_schema_markdown(graph),
+        schema_markdown=router_schema_markdown,
         anchor_resolution_payload=anchor_resolution_payload,
     )
     question_dsl = _build_question_dsl(question, parsed.normalized_query, schema_registry, route=route)
@@ -280,7 +288,12 @@ def _load_router_schema_markdown(graph: OntologyGraph) -> str:
     return ''
 
 
-def _resolve_anchor_resolution_payload(question: str, schema_registry: SchemaRegistry) -> dict[str, object] | None:
+def _resolve_anchor_resolution_payload(
+    question: str,
+    schema_registry: SchemaRegistry,
+    *,
+    schema_markdown: str = '',
+) -> dict[str, object] | None:
     locator_registry = build_anchor_locator_registry(schema_registry)
     if not locator_registry:
         return None
@@ -295,15 +308,46 @@ def _resolve_anchor_resolution_payload(question: str, schema_registry: SchemaReg
 
     fallback_payload: dict[str, object] | None = None
     for raw_anchor_text in surface_candidates:
-        result = resolve_anchor_candidates(
+        deterministic_result = resolve_anchor_candidates(
             raw_anchor_text=raw_anchor_text,
             locator_registry=locator_registry,
             candidate_rows_by_entity=candidate_rows_by_entity,
         )
-        if result.selected is not None and result.match_stage in {'exact', 'light'}:
-            return _build_anchor_resolution_payload(result)
-        if fallback_payload is None and result.candidates:
-            fallback_payload = _build_anchor_resolution_payload(result)
+        if not deterministic_result.candidates:
+            continue
+
+        candidate_context = build_anchor_candidate_context(
+            question=question,
+            schema_registry=schema_registry,
+            resolution=deterministic_result,
+        )
+
+        rank_decision = None
+        if not (
+            deterministic_result.selected is not None
+            and deterministic_result.match_stage in {'exact', 'light'}
+        ):
+            rank_decision = resolve_anchor_candidate_rank(
+                question=question,
+                schema_markdown=schema_markdown,
+                candidate_context=candidate_context,
+            )
+
+        payload = apply_anchor_resolution_policy(
+            deterministic_result=deterministic_result,
+            candidate_context=candidate_context,
+            rank_decision=rank_decision,
+        )
+        if payload is None:
+            continue
+
+        selection = payload.get('selection') if isinstance(payload, dict) else None
+        decision = str(selection.get('decision') or '').strip() if isinstance(selection, dict) else ''
+        if decision == 'select':
+            return payload
+        if fallback_payload is None:
+            fallback_payload = payload
+
     return fallback_payload
 
 
@@ -341,30 +385,6 @@ def _build_anchor_candidate_query(entity_name: str) -> str:
             f'limit {_ANCHOR_CANDIDATE_LIMIT};',
         ]
     )
-
-
-def _build_anchor_resolution_payload(result) -> dict[str, object]:
-    return {
-        'raw_anchor_text': result.raw_anchor_text,
-        'match_stage': result.match_stage,
-        'selected': (
-            {
-                'entity': result.selected.entity,
-                'attribute': result.selected.attribute,
-                'value': result.selected.value,
-            }
-            if result.selected is not None
-            else None
-        ),
-        'candidates': [
-            {
-                'entity': candidate.entity,
-                'attribute': candidate.attribute,
-                'value': candidate.value,
-            }
-            for candidate in result.candidates[:5]
-        ],
-    }
 
 
 def _run_typeql_readonly(typeql: str) -> tuple[list[dict[str, object]], str | None]:

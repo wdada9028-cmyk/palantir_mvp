@@ -204,3 +204,35 @@ def test_build_question_router_prompt_embeds_anchor_resolution_payload_when_pres
     assert '"raw_anchor_text": "pod-001"' in prompt
     assert '"match_stage": "light"' in prompt
     assert '"value": "POD-001"' in prompt
+
+
+def test_build_question_router_prompt_adds_selection_decision_guidance_when_selection_present():
+    prompt = build_question_router_prompt(
+        _schema_registry(),
+        'pod-001???????',
+        anchor_resolution_payload={
+            'raw_anchor_text': 'pod-001',
+            'match_stage': 'loose',
+            'selection': {
+                'decision': 'select',
+                'confidence': 0.93,
+                'confidence_tier': 'high',
+                'reason': 'best match',
+            },
+            'selected': {
+                'entity': 'PoD',
+                'attribute': 'pod_id',
+                'value': 'POD-001',
+            },
+            'candidates': [
+                {'entity': 'PoD', 'attribute': 'pod_id', 'value': 'POD-001'},
+                {'entity': 'PoD', 'attribute': 'pod_id', 'value': 'POD-002'},
+            ],
+        },
+    )
+
+    assert 'selection.decision is "select"' in prompt
+    assert 'confidence_tier is "high"' in prompt
+    assert 'prioritize anchor_resolution_payload.selected' in prompt
+    assert 'selection.decision is "ambiguous"' in prompt
+    assert 'do not force a selected anchor' in prompt

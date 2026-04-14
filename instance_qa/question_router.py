@@ -164,7 +164,13 @@ def build_question_router_prompt(
         json.dumps(payload, ensure_ascii=False, indent=2),
     ]
     if anchor_resolution_payload:
-        sections.extend(['Anchor resolution payload:', json.dumps(anchor_resolution_payload, ensure_ascii=False, indent=2)])
+        sections.extend([
+            'Anchor resolution payload:',
+            json.dumps(anchor_resolution_payload, ensure_ascii=False, indent=2),
+            'If anchor_resolution_payload.selection.decision is "select" and confidence_tier is "high", prioritize anchor_resolution_payload.selected when choosing anchor_locator.',
+            'If anchor_resolution_payload.selection.decision is "ambiguous", do not force a selected anchor; return a conservative route.',
+            'If anchor_resolution_payload.selection is missing, fall back to schema + query understanding.',
+        ])
     if schema_markdown.strip():
         sections.extend(['Schema markdown:', schema_markdown.strip()])
     return '\\n\\n'.join(sections)

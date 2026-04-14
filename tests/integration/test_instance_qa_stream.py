@@ -425,7 +425,7 @@ Attributes:
             return ([{'_entity': 'PoD', 'pod_id': 'POD-001', 'pod_status': 'Installing'}], None)
         return ([], None)
 
-    monkeypatch.setattr(orch, '_resolve_anchor_resolution_payload', lambda question, schema_registry: anchor_resolution_payload)
+    monkeypatch.setattr(orch, '_resolve_anchor_resolution_payload', lambda *args, **kwargs: anchor_resolution_payload)
     monkeypatch.setattr(orch, 'resolve_question_route', fake_resolve_question_route)
     monkeypatch.setattr(orch, 'validate_question_route', lambda *args, **kwargs: None)
     monkeypatch.setattr(orch, 'validate_question_dsl', lambda *args, **kwargs: None)
@@ -441,3 +441,292 @@ Attributes:
     assert question_payload['question_dsl']['anchor']['entity'] == 'PoD'
     assert question_payload['question_dsl']['anchor']['identifier'] == {'attribute': 'pod_id', 'value': 'POD-001'}
     assert question_payload['question_dsl']['reasoning_scope'] == 'anchor_only'
+
+
+
+def test_instance_qa_stream_orchestrator_uses_ranker_payload_before_router(tmp_path: Path, monkeypatch):
+    input_file = tmp_path / 'ontology.md'
+    input_file.write_text(
+        """# Test Ontology
+
+## Object Types
+
+### `PoD`
+PoD
+Attributes:
+- `pod_id`: PoD ID
+- `pod_status`: PoD status
+
+## Link Types
+- `PoD HAS PoD`: PoD self relation
+""",
+        encoding='utf-8',
+    )
+
+    import cloud_delivery_ontology_palantir.instance_qa.orchestrator as orch
+    from cloud_delivery_ontology_palantir.instance_qa.anchor_candidate_ranker import AnchorRankDecision
+    from cloud_delivery_ontology_palantir.instance_qa.anchor_candidate_resolver import AnchorCandidate, AnchorResolutionResult
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import AnchorLocator, QuestionRoute
+
+    deterministic_result = AnchorResolutionResult(
+        raw_anchor_text='pod-001',
+        match_stage='loose',
+        selected=None,
+        candidates=[
+            AnchorCandidate(entity='PoD', attribute='pod_id', value='POD-001', source_row={'pod_id': 'POD-001'}),
+            AnchorCandidate(entity='PoD', attribute='pod_id', value='POD-002', source_row={'pod_id': 'POD-002'}),
+        ],
+    )
+    candidate_context = {
+        'raw_anchor_text': 'pod-001',
+        'question': 'pod-001???????',
+        'candidate_entity': 'PoD',
+        'candidates': [
+            {
+                'candidate_id': 'cand_1',
+                'entity': 'PoD',
+                'locator': {'matched_attribute': 'pod_id', 'matched_value': 'POD-001', 'match_stage': 'loose'},
+            },
+            {
+                'candidate_id': 'cand_2',
+                'entity': 'PoD',
+                'locator': {'matched_attribute': 'pod_id', 'matched_value': 'POD-002', 'match_stage': 'loose'},
+            },
+        ],
+    }
+    rank_decision = AnchorRankDecision(decision='select', selected_candidate_id='cand_2', confidence=0.93, reason='best')
+    policy_payload = {
+        'raw_anchor_text': 'pod-001',
+        'match_stage': 'loose',
+        'selection': {'decision': 'select', 'confidence': 0.93, 'confidence_tier': 'high', 'reason': 'best'},
+        'selected': {'entity': 'PoD', 'attribute': 'pod_id', 'value': 'POD-002'},
+        'candidates': [
+            {'entity': 'PoD', 'attribute': 'pod_id', 'value': 'POD-001'},
+            {'entity': 'PoD', 'attribute': 'pod_id', 'value': 'POD-002'},
+        ],
+    }
+
+    def fake_resolve_question_route(*args, **kwargs):
+        assert kwargs['anchor_resolution_payload'] == policy_payload
+        return QuestionRoute(
+            intent='attribute_lookup',
+            anchor_entity='PoD',
+            anchor_locator=AnchorLocator(match_type='key_attribute', attribute='pod_id', value='POD-002'),
+            target_attributes=['pod_status'],
+            reasoning_scope='anchor_only',
+            confidence=0.98,
+            why='ranker selected POD-002',
+        )
+
+    def fake_run_typeql_readonly(typeql: str):
+        if '$root isa pod;' in typeql and '$root has pod-id "POD-002";' in typeql:
+            return ([{'_entity': 'PoD', 'pod_id': 'POD-002', 'pod_status': 'Installing'}], None)
+        return ([], None)
+
+    monkeypatch.setattr(orch, 'build_anchor_locator_registry', lambda schema_registry: {'PoD': object()})
+    monkeypatch.setattr(orch, 'build_anchor_locator_registry', lambda schema_registry: {'PoD': object()})
+    monkeypatch.setattr(orch, '_extract_anchor_surface_candidates', lambda question: ['pod-001'])
+    monkeypatch.setattr(orch, '_load_anchor_candidate_rows', lambda locator_registry: {'PoD': [{'pod_id': 'POD-001'}, {'pod_id': 'POD-002'}]})
+    monkeypatch.setattr(orch, 'resolve_anchor_candidates', lambda **kwargs: deterministic_result)
+    monkeypatch.setattr(orch, 'build_anchor_candidate_context', lambda **kwargs: candidate_context)
+    monkeypatch.setattr(orch, 'resolve_anchor_candidate_rank', lambda **kwargs: rank_decision)
+    monkeypatch.setattr(orch, 'apply_anchor_resolution_policy', lambda **kwargs: policy_payload)
+    monkeypatch.setattr(orch, 'resolve_question_route', fake_resolve_question_route)
+    monkeypatch.setattr(orch, 'validate_question_route', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, 'validate_question_dsl', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, 'validate_fact_query_dsl', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, '_run_typeql_readonly', fake_run_typeql_readonly)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'pod-001???????'})
+
+    assert response.status_code == 200
+    question_payload = _event_payloads(response.text, 'question_dsl')[0]
+    assert question_payload['question_dsl']['anchor']['identifier'] == {'attribute': 'pod_id', 'value': 'POD-002'}
+
+
+def test_instance_qa_stream_orchestrator_short_circuits_exact_without_ranker(tmp_path: Path, monkeypatch):
+    input_file = tmp_path / 'ontology.md'
+    input_file.write_text(
+        """# Test Ontology
+
+## Object Types
+
+### `PoD`
+PoD
+Attributes:
+- `pod_id`: PoD ID
+- `pod_status`: PoD status
+
+## Link Types
+- `PoD HAS PoD`: PoD self relation
+""",
+        encoding='utf-8',
+    )
+
+    import cloud_delivery_ontology_palantir.instance_qa.orchestrator as orch
+    from cloud_delivery_ontology_palantir.instance_qa.anchor_candidate_resolver import AnchorCandidate, AnchorResolutionResult
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import AnchorLocator, QuestionRoute
+
+    deterministic_result = AnchorResolutionResult(
+        raw_anchor_text='POD-001',
+        match_stage='exact',
+        selected=AnchorCandidate(entity='PoD', attribute='pod_id', value='POD-001', source_row={'pod_id': 'POD-001'}),
+        candidates=[AnchorCandidate(entity='PoD', attribute='pod_id', value='POD-001', source_row={'pod_id': 'POD-001'})],
+    )
+    candidate_context = {
+        'raw_anchor_text': 'POD-001',
+        'question': 'POD-001???????',
+        'candidate_entity': 'PoD',
+        'candidates': [
+            {
+                'candidate_id': 'cand_1',
+                'entity': 'PoD',
+                'locator': {'matched_attribute': 'pod_id', 'matched_value': 'POD-001', 'match_stage': 'exact'},
+            },
+        ],
+    }
+    policy_payload = {
+        'raw_anchor_text': 'POD-001',
+        'match_stage': 'exact',
+        'selection': {'decision': 'select', 'confidence': 1.0, 'confidence_tier': 'high', 'source': 'deterministic_short_circuit'},
+        'selected': {'entity': 'PoD', 'attribute': 'pod_id', 'value': 'POD-001'},
+        'candidates': [{'entity': 'PoD', 'attribute': 'pod_id', 'value': 'POD-001'}],
+    }
+
+    def fake_resolve_question_route(*args, **kwargs):
+        assert kwargs['anchor_resolution_payload']['selection']['source'] == 'deterministic_short_circuit'
+        return QuestionRoute(
+            intent='attribute_lookup',
+            anchor_entity='PoD',
+            anchor_locator=AnchorLocator(match_type='key_attribute', attribute='pod_id', value='POD-001'),
+            target_attributes=['pod_status'],
+            reasoning_scope='anchor_only',
+            confidence=0.99,
+            why='deterministic exact selected POD-001',
+        )
+
+    def fake_run_typeql_readonly(typeql: str):
+        if '$root isa pod;' in typeql and '$root has pod-id "POD-001";' in typeql:
+            return ([{'_entity': 'PoD', 'pod_id': 'POD-001', 'pod_status': 'Installing'}], None)
+        return ([], None)
+
+    monkeypatch.setattr(orch, 'build_anchor_locator_registry', lambda schema_registry: {'PoD': object()})
+    monkeypatch.setattr(orch, '_extract_anchor_surface_candidates', lambda question: ['POD-001'])
+    monkeypatch.setattr(orch, '_load_anchor_candidate_rows', lambda locator_registry: {'PoD': [{'pod_id': 'POD-001'}]})
+    monkeypatch.setattr(orch, 'resolve_anchor_candidates', lambda **kwargs: deterministic_result)
+    monkeypatch.setattr(orch, 'build_anchor_candidate_context', lambda **kwargs: candidate_context)
+
+    def fail_ranker(**kwargs):
+        raise AssertionError('ranker should not be called for exact/light unique match')
+
+    monkeypatch.setattr(orch, 'resolve_anchor_candidate_rank', fail_ranker)
+    monkeypatch.setattr(orch, 'apply_anchor_resolution_policy', lambda **kwargs: policy_payload)
+    monkeypatch.setattr(orch, 'resolve_question_route', fake_resolve_question_route)
+    monkeypatch.setattr(orch, 'validate_question_route', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, 'validate_question_dsl', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, 'validate_fact_query_dsl', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, '_run_typeql_readonly', fake_run_typeql_readonly)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'POD-001???????'})
+
+    assert response.status_code == 200
+
+
+def test_instance_qa_stream_orchestrator_does_not_force_selected_when_ranker_ambiguous(tmp_path: Path, monkeypatch):
+    input_file = tmp_path / 'ontology.md'
+    input_file.write_text(
+        """# Test Ontology
+
+## Object Types
+
+### `PoD`
+PoD
+Attributes:
+- `pod_id`: PoD ID
+- `pod_status`: PoD status
+
+## Link Types
+- `PoD HAS PoD`: PoD self relation
+""",
+        encoding='utf-8',
+    )
+
+    import cloud_delivery_ontology_palantir.instance_qa.orchestrator as orch
+    from cloud_delivery_ontology_palantir.instance_qa.anchor_candidate_ranker import AnchorRankDecision
+    from cloud_delivery_ontology_palantir.instance_qa.anchor_candidate_resolver import AnchorCandidate, AnchorResolutionResult
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import AnchorLocator, QuestionRoute
+
+    deterministic_result = AnchorResolutionResult(
+        raw_anchor_text='pod-001',
+        match_stage='loose',
+        selected=None,
+        candidates=[
+            AnchorCandidate(entity='PoD', attribute='pod_id', value='POD-001', source_row={'pod_id': 'POD-001'}),
+            AnchorCandidate(entity='PoD', attribute='pod_id', value='POD-002', source_row={'pod_id': 'POD-002'}),
+        ],
+    )
+    candidate_context = {
+        'raw_anchor_text': 'pod-001',
+        'question': 'pod-001?pod-002??????',
+        'candidate_entity': 'PoD',
+        'candidates': [
+            {
+                'candidate_id': 'cand_1',
+                'entity': 'PoD',
+                'locator': {'matched_attribute': 'pod_id', 'matched_value': 'POD-001', 'match_stage': 'loose'},
+            },
+            {
+                'candidate_id': 'cand_2',
+                'entity': 'PoD',
+                'locator': {'matched_attribute': 'pod_id', 'matched_value': 'POD-002', 'match_stage': 'loose'},
+            },
+        ],
+    }
+    rank_decision = AnchorRankDecision(decision='ambiguous', selected_candidate_id='', confidence=0.51, reason='insufficient signal')
+    ambiguous_payload = {
+        'raw_anchor_text': 'pod-001',
+        'match_stage': 'loose',
+        'selection': {'decision': 'ambiguous', 'confidence': 0.51, 'confidence_tier': 'low', 'reason': 'insufficient signal'},
+        'selected': None,
+        'candidates': [
+            {'entity': 'PoD', 'attribute': 'pod_id', 'value': 'POD-001'},
+            {'entity': 'PoD', 'attribute': 'pod_id', 'value': 'POD-002'},
+        ],
+    }
+
+    def fake_resolve_question_route(*args, **kwargs):
+        payload = kwargs['anchor_resolution_payload']
+        assert payload['selection']['decision'] == 'ambiguous'
+        assert payload['selected'] is None
+        return QuestionRoute(
+            intent='instance_lookup',
+            anchor_entity='PoD',
+            anchor_locator=AnchorLocator(match_type='key_attribute', attribute='pod_id', value='POD-001'),
+            target_attributes=[],
+            reasoning_scope='expand_graph',
+            confidence=0.77,
+            why='ambiguous candidates, conservative route',
+        )
+
+    monkeypatch.setattr(orch, 'build_anchor_locator_registry', lambda schema_registry: {'PoD': object()})
+    monkeypatch.setattr(orch, '_extract_anchor_surface_candidates', lambda question: ['pod-001'])
+    monkeypatch.setattr(orch, '_load_anchor_candidate_rows', lambda locator_registry: {'PoD': [{'pod_id': 'POD-001'}, {'pod_id': 'POD-002'}]})
+    monkeypatch.setattr(orch, 'resolve_anchor_candidates', lambda **kwargs: deterministic_result)
+    monkeypatch.setattr(orch, 'build_anchor_candidate_context', lambda **kwargs: candidate_context)
+    monkeypatch.setattr(orch, 'resolve_anchor_candidate_rank', lambda **kwargs: rank_decision)
+    monkeypatch.setattr(orch, 'apply_anchor_resolution_policy', lambda **kwargs: ambiguous_payload)
+    monkeypatch.setattr(orch, 'resolve_question_route', fake_resolve_question_route)
+    monkeypatch.setattr(orch, 'validate_question_route', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, 'validate_question_dsl', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, 'validate_fact_query_dsl', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, '_run_typeql_readonly', lambda typeql: ([], None))
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'pod-001?pod-002??????'})
+
+    assert response.status_code == 200
