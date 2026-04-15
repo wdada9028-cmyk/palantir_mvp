@@ -30,6 +30,8 @@ async def iter_qa_events(result: InstanceQAResult) -> AsyncIterator[str]:
         'step': step,
         'question_dsl': _question_to_dict(result.question_dsl),
         'validation_error': result.question_validation_error,
+        'router_diagnostics': result.router_diagnostics,
+        'blocked_before_retrieval': result.blocked_before_retrieval,
     })
 
     schema_trace_events, step = _build_schema_trace_events(result, session_id=session_id, start_step=step)
@@ -122,6 +124,8 @@ async def iter_qa_events(result: InstanceQAResult) -> AsyncIterator[str]:
         'reasoning': result.reasoning,
         'fact_pack': result.fact_pack,
         'trace_summary': result.trace_summary,
+        'router_diagnostics': result.router_diagnostics,
+        'blocked_before_retrieval': result.blocked_before_retrieval,
     })
 
 
@@ -138,6 +142,8 @@ def _llm_context_to_dict(result: InstanceQAResult) -> dict[str, object]:
 
 
 def _build_schema_trace_events(result: InstanceQAResult, *, session_id: str, start_step: int) -> tuple[list[str], int]:
+    if result.blocked_before_retrieval:
+        return [], start_step
     bundle = result.schema_retrieval_bundle
     search_trace = bundle.search_trace
     events: list[str] = []

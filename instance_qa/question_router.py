@@ -35,6 +35,14 @@ class QuestionRoute:
 
 
 @dataclass(frozen=True, slots=True)
+class QuestionRouteResolution:
+    status: str
+    error_type: str
+    error_message: str
+    route: QuestionRoute | None
+
+
+@dataclass(frozen=True, slots=True)
 class _RouterConfig:
     api_base: str
     api_key: str
@@ -130,7 +138,7 @@ def build_question_router_prompt(
                 'target_attributes': ['pod_status'],
                 'reasoning_scope': 'anchor_only',
                 'confidence': 0.97,
-                'why': 'The user asks for one concrete instance attribute.',
+                'why': '?????????????????',
             },
         },
         {
@@ -142,7 +150,7 @@ def build_question_router_prompt(
                 'target_attributes': [],
                 'reasoning_scope': 'expand_graph',
                 'confidence': 0.96,
-                'why': 'The user asks for downstream impact analysis, not a single field value.',
+                'why': '?????????????????????',
             },
         },
     ]
@@ -155,24 +163,24 @@ def build_question_router_prompt(
         'query': raw_query,
     }
     sections = [
-        'You are a question router for an ontology-backed instance QA system.',
-        'Return JSON only.',
-        'Choose anchor_entity and target_attributes only from the provided schema.',
-        'Use attribute_lookup + anchor_only only when the user asks for a specific instance field or status.',
-        'Use impact_analysis / relation_query / instance_lookup + expand_graph when the user asks for impact, dependency, relation, or multi-hop context.',
-        'Controlled payload:',
+        '???????????????????????',
+        '???? JSON?',
+        'anchor_entity ? target_attributes ?????? schema ????',
+        '??????????????????????? attribute_lookup + anchor_only?',
+        '??????????????????????? impact_analysis / relation_query / instance_lookup + expand_graph?',
+        '?????',
         json.dumps(payload, ensure_ascii=False, indent=2),
     ]
     if anchor_resolution_payload:
         sections.extend([
-            'Anchor resolution payload:',
+            '?????????',
             json.dumps(anchor_resolution_payload, ensure_ascii=False, indent=2),
-            'If anchor_resolution_payload.selection.decision is "select" and confidence_tier is "high", prioritize anchor_resolution_payload.selected when choosing anchor_locator.',
-            'If anchor_resolution_payload.selection.decision is "ambiguous", do not force a selected anchor; return a conservative route.',
-            'If anchor_resolution_payload.selection is missing, fall back to schema + query understanding.',
+            '?? anchor_resolution_payload.selection.decision ? "select"?? confidence_tier ? "high"????? anchor_resolution_payload.selected ?? anchor_locator?',
+            '?? anchor_resolution_payload.selection.decision ? "ambiguous"???????????????????',
+            '?? anchor_resolution_payload.selection ??????? schema + ???????',
         ])
     if schema_markdown.strip():
-        sections.extend(['Schema markdown:', schema_markdown.strip()])
+        sections.extend(['Schema ???', schema_markdown.strip()])
     return '\\n\\n'.join(sections)
 
 
@@ -184,10 +192,10 @@ def resolve_question_route(
     schema_markdown: str = '',
     anchor_resolution_payload: dict[str, object] | None = None,
     timeout_s: float = _DEFAULT_TIMEOUT_S,
-) -> QuestionRoute | None:
+) -> QuestionRouteResolution:
     config = _load_config()
     if config is None:
-        return None
+        return _failed_route_resolution('router_not_configured', 'Missing QWEN_API_BASE or QWEN_API_KEY.')
 
     try:
         response = get_openai_client(timeout_s=timeout_s).chat.completions.create(
@@ -197,7 +205,7 @@ def resolve_question_route(
             messages=[
                 {
                     'role': 'system',
-                    'content': 'You are a controlled semantic router. Return JSON only.',
+                    'content': '????????????????? JSON?',
                 },
                 {
                     'role': 'user',
@@ -212,14 +220,44 @@ def resolve_question_route(
             timeout=timeout_s,
         )
         content = _extract_message_content(response)
-        route = parse_question_route_payload(_parse_json_object(content))
-    except Exception:
-        return None
+        parsed = _parse_json_object(content)
+        route = parse_question_route_payload(parsed)
+    except json.JSONDecodeError as exc:
+        return _failed_route_resolution('router_invalid_json', f'Router output is not valid JSON: {exc}')
+    except ValueError as exc:
+        return _failed_route_resolution('router_invalid_payload', str(exc))
+    except Exception as exc:
+        if _looks_like_timeout_error(exc):
+            return _failed_route_resolution('router_timeout', str(exc) or 'Router request timed out.')
+        if _looks_like_connect_error(exc):
+            return _failed_route_resolution('router_connect_error', str(exc) or 'Router connection failed.')
+        return _failed_route_resolution('router_unknown_error', str(exc) or type(exc).__name__)
 
-    if validate_question_route(route, schema_registry) is not None:
-        return None
-    return route
+    validation_error = validate_question_route(route, schema_registry)
+    if validation_error is not None:
+        return _failed_route_resolution('router_validation_failed', validation_error)
+    return QuestionRouteResolution(status='ok', error_type='', error_message='', route=route)
 
+
+
+def _failed_route_resolution(error_type: str, error_message: str) -> QuestionRouteResolution:
+    return QuestionRouteResolution(status='failed', error_type=error_type, error_message=error_message, route=None)
+
+
+def _looks_like_timeout_error(exc: Exception) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    name = type(exc).__name__.lower()
+    message = str(exc).lower()
+    return 'timeout' in name or 'timed out' in message or 'timeout' in message
+
+
+def _looks_like_connect_error(exc: Exception) -> bool:
+    if isinstance(exc, ConnectionError):
+        return True
+    name = type(exc).__name__.lower()
+    message = str(exc).lower()
+    return 'connect' in name or 'connection' in message
 
 def load_schema_markdown(path: str | Path | None) -> str:
     if path is None:

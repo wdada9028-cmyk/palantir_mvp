@@ -3,16 +3,27 @@
 ## Current State
 - Agent: Codex
 - Branch: codex/llm-question-router
-- Last session: 2026-04-10 16:39
-- Active work: cleaned QA playback/status copy, removed raw ** entity emphasis in the answer panel, and fixed attribute-lookup fallback wording so POD status answers and trace replay stay customer-readable
+- Last session: 2026-04-14 17:33
+- Active work: completed router failure explicit-error handling end-to-end (SSE + frontend), fixed playback resume behavior, and cleaned related integration regressions
 - Blockers: None
 - Next steps:
-  - Browser-smoke POD-001??????? and L1-A??????????????
-  - If the live browser is clean, commit the router + playback UX changes together
+  - 如需，提交当前未提交改动
+  - 如需，继续清理 router diagnostics 契约重复与测试夹具乱码
 
 ## Session History
+### 2026-04-14 17:33 - Codex
+**What was done:**
+- 修复 router failure 前端状态文案乱码，question_dsl / fact_query_planned / evidence_bundle_ready / answer_done 均改为明确中文失败态提示
+- 完成 router failure 显式错误处理的 SSE/前端收口：blocked_before_retrieval 时不再播放正常 schema trace，页面直接展示失败状态
+- 修复 instance QA 流测试中 relation_query 场景缺少成功 router monkeypatch 的问题，并补齐回归断言
+- 复跑相关回归：question router / instance QA stream / graph export / llm answer context / generator / template answering，全绿
 
+**Decisions made:**
+- router 失败时不再伪装为正常检索成功，前端直接展示失败态文案
+- 前端新增失败态文案统一使用真实中文，避免再次出现问号乱码
 
+**Open questions:**
+- 仍有 1 个既有 DeprecationWarning（测试里 \*\*([^*]+)\*\* 字面量），未处理
 ### 2026-04-10 16:39 - Codex
 **What was done:**
 - Fixed instance-QA SSE trace copy so `trace_anchor`, `trace_expand`, and `evidence_final` now emit readable Chinese instead of placeholder question marks
@@ -715,4 +726,5 @@
 
 **Open questions:**
 - None
+
 

@@ -62,7 +62,7 @@ def test_build_question_router_prompt_embeds_schema_markdown_verbatim():
 
     prompt = build_question_router_prompt(_schema_registry(), 'POD-001???????', schema_markdown=schema_markdown)
 
-    assert 'Schema markdown:' in prompt
+    assert 'Schema ???' in prompt
     assert '## Object Types????' in prompt
     assert '?????PoD' in prompt
     assert '- `pod_status`?PoD??' in prompt
@@ -169,9 +169,12 @@ def test_resolve_question_route_uses_openai_client_and_router_timeout_120_second
 
     monkeypatch.setattr('cloud_delivery_ontology_palantir.instance_qa.question_router.get_openai_client', lambda timeout_s=120.0: fake_client)
 
-    route = resolve_question_route('POD-001???????', _schema_registry(), schema_markdown='# schema')
+    resolution = resolve_question_route('POD-001???????', _schema_registry(), schema_markdown='# schema')
 
-    assert route is not None
+    assert resolution.status == 'ok'
+    assert resolution.error_type == ''
+    assert resolution.error_message == ''
+    assert resolution.route is not None
     assert captured['model'] == 'qwen3.6-plus'
     assert captured['temperature'] == 0.0
     assert captured['response_format'] == {'type': 'json_object'}
@@ -200,7 +203,7 @@ def test_build_question_router_prompt_embeds_anchor_resolution_payload_when_pres
         },
     )
 
-    assert 'Anchor resolution payload:' in prompt
+    assert '?????????' in prompt
     assert '"raw_anchor_text": "pod-001"' in prompt
     assert '"match_stage": "light"' in prompt
     assert '"value": "POD-001"' in prompt
@@ -231,8 +234,135 @@ def test_build_question_router_prompt_adds_selection_decision_guidance_when_sele
         },
     )
 
-    assert 'selection.decision is "select"' in prompt
-    assert 'confidence_tier is "high"' in prompt
-    assert 'prioritize anchor_resolution_payload.selected' in prompt
-    assert 'selection.decision is "ambiguous"' in prompt
-    assert 'do not force a selected anchor' in prompt
+    assert '?? anchor_resolution_payload.selection.decision ? "select"' in prompt
+    assert '? confidence_tier ? "high"' in prompt
+    assert '???? anchor_resolution_payload.selected' in prompt
+    assert '?? anchor_resolution_payload.selection.decision ? "ambiguous"' in prompt
+    assert '??????????' in prompt
+
+
+def test_resolve_question_route_returns_not_configured_when_env_missing(monkeypatch):
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import resolve_question_route
+
+    monkeypatch.delenv('QWEN_API_BASE', raising=False)
+    monkeypatch.delenv('QWEN_API_KEY', raising=False)
+
+    resolution = resolve_question_route('POD-001???????', _schema_registry(), schema_markdown='# schema')
+
+    assert resolution.status == 'failed'
+    assert resolution.error_type == 'router_not_configured'
+    assert resolution.route is None
+
+
+def test_resolve_question_route_maps_invalid_json(monkeypatch):
+    from types import SimpleNamespace
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import resolve_question_route
+
+    monkeypatch.setenv('QWEN_API_BASE', 'https://example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'test-key')
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='not-json'))]
+            )
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    monkeypatch.setattr('cloud_delivery_ontology_palantir.instance_qa.question_router.get_openai_client', lambda timeout_s=120.0: fake_client)
+
+    resolution = resolve_question_route('POD-001???????', _schema_registry(), schema_markdown='# schema')
+
+    assert resolution.status == 'failed'
+    assert resolution.error_type == 'router_invalid_json'
+    assert resolution.route is None
+
+
+def test_resolve_question_route_maps_invalid_payload(monkeypatch):
+    from types import SimpleNamespace
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import resolve_question_route
+
+    monkeypatch.setenv('QWEN_API_BASE', 'https://example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'test-key')
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content='{"intent": "attribute_lookup", "anchor_entity": "PoD", "target_attributes": ["pod_status"], "reasoning_scope": "anchor_only", "confidence": 0.97}'
+                        )
+                    )
+                ]
+            )
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    monkeypatch.setattr('cloud_delivery_ontology_palantir.instance_qa.question_router.get_openai_client', lambda timeout_s=120.0: fake_client)
+
+    resolution = resolve_question_route('POD-001???????', _schema_registry(), schema_markdown='# schema')
+
+    assert resolution.status == 'failed'
+    assert resolution.error_type == 'router_invalid_payload'
+    assert resolution.route is None
+
+
+def test_resolve_question_route_maps_validation_failed(monkeypatch):
+    from types import SimpleNamespace
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import resolve_question_route
+
+    monkeypatch.setenv('QWEN_API_BASE', 'https://example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'test-key')
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content='{"intent": "attribute_lookup", "anchor_entity": "PoD", "anchor_locator": {"match_type": "key_attribute", "attribute": "pod_id", "value": "POD-001"}, "target_attributes": ["room_status"], "reasoning_scope": "anchor_only", "confidence": 0.97}'
+                        )
+                    )
+                ]
+            )
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    monkeypatch.setattr('cloud_delivery_ontology_palantir.instance_qa.question_router.get_openai_client', lambda timeout_s=120.0: fake_client)
+
+    resolution = resolve_question_route('POD-001???????', _schema_registry(), schema_markdown='# schema')
+
+    assert resolution.status == 'failed'
+    assert resolution.error_type == 'router_validation_failed'
+    assert resolution.route is None
+
+
+def test_resolve_question_route_maps_timeout_and_connect_errors(monkeypatch):
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import resolve_question_route
+
+    monkeypatch.setenv('QWEN_API_BASE', 'https://example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'test-key')
+
+    def _timeout_client(timeout_s=120.0):
+        class _Completions:
+            def create(self, **kwargs):
+                raise TimeoutError('timeout')
+        class _Client:
+            chat = type('Chat', (), {'completions': _Completions()})()
+        return _Client()
+
+    monkeypatch.setattr('cloud_delivery_ontology_palantir.instance_qa.question_router.get_openai_client', _timeout_client)
+    timeout_resolution = resolve_question_route('POD-001???????', _schema_registry(), schema_markdown='# schema')
+    assert timeout_resolution.status == 'failed'
+    assert timeout_resolution.error_type == 'router_timeout'
+
+    def _connect_client(timeout_s=120.0):
+        class _Completions:
+            def create(self, **kwargs):
+                raise ConnectionError('connect failed')
+        class _Client:
+            chat = type('Chat', (), {'completions': _Completions()})()
+        return _Client()
+
+    monkeypatch.setattr('cloud_delivery_ontology_palantir.instance_qa.question_router.get_openai_client', _connect_client)
+    connect_resolution = resolve_question_route('POD-001???????', _schema_registry(), schema_markdown='# schema')
+    assert connect_resolution.status == 'failed'
+    assert connect_resolution.error_type == 'router_connect_error'

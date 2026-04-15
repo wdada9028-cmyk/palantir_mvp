@@ -319,3 +319,20 @@ def test_iter_generated_instance_answer_falls_back_when_context_missing(monkeypa
     chunks = asyncio.run(_collect_instance('?????', None, fallback))
 
     assert chunks == [GeneratorResult(answer_text='deterministic fallback', used_fallback=True)]
+
+
+def test_build_instance_messages_preserves_router_failure_diagnostics_from_llm_context():
+    context = _build_evidence_context()
+    context.user_payload['understanding']['router_diagnostics'] = {
+        'status': 'failed',
+        'error_type': 'router_invalid_json',
+        'error_message': 'bad json',
+    }
+    context.user_payload['understanding']['blocked_before_retrieval'] = True
+    context.user_payload['router_diagnostics'] = context.user_payload['understanding']['router_diagnostics']
+    context.user_payload['blocked_before_retrieval'] = True
+
+    messages = _build_instance_messages('POD-001???????', context)
+
+    assert 'router_invalid_json' in messages[1]['content']
+    assert '\u672a\u8fdb\u5165\u6b63\u5e38\u5b9e\u4f8b\u68c0\u7d22\u94fe\u8def' in messages[1]['content']

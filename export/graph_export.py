@@ -282,6 +282,8 @@ window.cytoscape = window.cytoscape || cytoscape;
     let currentFocusTargets = [];
     let currentPlaybackStepIndex = -1;
     let playbackController = null;
+    let playbackVisibilityPaused = false;
+    let currentRouterDiagnostics = null;
     let activeDetailNode = null;
     let detailCardFrame = null;
 
@@ -685,6 +687,40 @@ window.cytoscape = window.cytoscape || cytoscape;
       controller.timers = [];
     }
 
+    function resolveLatestPlaybackSnapshot(controller) {
+      if (!controller) return null;
+      if (controller.currentSnapshot && (controller.currentSnapshot.node_ids || controller.currentSnapshot.edge_ids)) {
+        return normalizeSnapshot(controller.currentSnapshot);
+      }
+      if (persistedEvidenceChain.length) {
+        for (let index = persistedEvidenceChain.length - 1; index >= 0; index -= 1) {
+          const item = persistedEvidenceChain[index];
+          const snapshot = evidenceSnapshots.get(item.evidence_id);
+          if (hasSnapshotData(snapshot)) {
+            return normalizeSnapshot(snapshot);
+          }
+        }
+      }
+      return null;
+    }
+
+    function pausePlaybackForHiddenDocument() {
+      if (!playbackController) return;
+      playbackVisibilityPaused = true;
+      clearPlaybackTimers(playbackController);
+      playbackController.running = false;
+    }
+
+    function resumePlaybackAfterVisibilityRestore() {
+      if (!playbackController) return;
+      playbackVisibilityPaused = false;
+      playbackController.flushToLatestVisibleState();
+      const finalSnapshot = resolveLatestPlaybackSnapshot(playbackController);
+      if (finalSnapshot && hasSnapshotData(finalSnapshot)) {
+        replayFromSnapshot(finalSnapshot, { fit: true, duration: 0, pulseDuration: 0 });
+      }
+    }
+
     function showTraceResetButton() {
       traceResetButton.classList.remove('hidden');
     }
@@ -738,6 +774,7 @@ window.cytoscape = window.cytoscape || cytoscape;
       currentTraceSummary = null;
       currentQuestionDsl = null;
       currentEvidenceBundle = null;
+      currentRouterDiagnostics = null;
       currentPlaybackStepIndex = -1;
       qaFocusPlaybackCard.classList.add('hidden');
       qaPlaybackCurrent.textContent = '\u7b49\u5f85\u5b9e\u4f53\u68c0\u7d22';
@@ -1162,6 +1199,22 @@ window.cytoscape = window.cytoscape || cytoscape;
       }
     }
 
+
+    function handleRouterFailureDiagnostics(routerDiagnostics, blockedBeforeRetrieval) {
+      const diagnostics = routerDiagnostics && typeof routerDiagnostics === 'object' ? routerDiagnostics : {};
+      if (String(diagnostics.status || '').trim() !== 'failed') return false;
+      currentRouterDiagnostics = diagnostics;
+      const errorType = String(diagnostics.error_type || 'router_unknown_error').trim() || 'router_unknown_error';
+      const answer = `\u8def\u7531\u8bc6\u522b\u5931\u8d25\uff1a${errorType}\u3002\u672c\u6b21\u672a\u8fdb\u5165\u6b63\u5e38\u5b9e\u4f8b\u68c0\u7d22\u94fe\u8def\uff0c\u8bf7\u91cd\u8bd5\u4e00\u6b21\uff1b\u5982\u6301\u7eed\u5931\u8d25\uff0c\u8bf7\u68c0\u67e5\u8def\u7531\u6a21\u578b\u670d\u52a1\u914d\u7f6e\u3001\u7f51\u7edc\u8fde\u63a5\u6216\u8fd4\u56de\u683c\u5f0f\u3002`;
+      setQaAnswer(answer);
+      setQaAnswerTabState(true);
+      setQaStatus(`\u8def\u7531\u8bc6\u522b\u5931\u8d25\uff1a${errorType}`);
+      if (blockedBeforeRetrieval) {
+        qaFocusPlaybackCard.classList.add('hidden');
+      }
+      return true;
+    }
+
     function handleInstanceQaStageEvent(eventType, payload) {
       const safePayload = payload && typeof payload === 'object' ? payload : {};
       if (eventType === 'trace_summary_ready') {
@@ -1169,7 +1222,9 @@ window.cytoscape = window.cytoscape || cytoscape;
           ? safePayload.trace_summary
           : null;
         setQaTraceSummary(currentTraceSummary);
-        setQaStatus('\u5df2\u751f\u6210\u56de\u7b54\u6458\u8981');
+        if (!handleRouterFailureDiagnostics(safePayload.router_diagnostics, safePayload.blocked_before_retrieval)) {
+          setQaStatus('\u5df2\u751f\u6210\u56de\u7b54\u6458\u8981');
+        }
         return;
       }
 
@@ -1185,13 +1240,19 @@ window.cytoscape = window.cytoscape || cytoscape;
         currentQuestionDsl = safePayload.question_dsl && typeof safePayload.question_dsl === 'object'
           ? safePayload.question_dsl
           : null;
+        currentRouterDiagnostics = safePayload.router_diagnostics && typeof safePayload.router_diagnostics === 'object'
+          ? safePayload.router_diagnostics
+          : null;
         const anchor = currentQuestionDsl && currentQuestionDsl.anchor && typeof currentQuestionDsl.anchor === 'object'
           ? currentQuestionDsl.anchor
           : {};
         const scenario = currentQuestionDsl && currentQuestionDsl.scenario && typeof currentQuestionDsl.scenario === 'object'
           ? currentQuestionDsl.scenario
           : {};
-        setQaStatus(`\u5df2\u8bc6\u522b\u9526\u70b9 ${anchor.entity || '-'} / \u4e8b\u4ef6 ${scenario.event_type || '-'} / \u6a21\u5f0f ${currentQuestionDsl && currentQuestionDsl.mode || '-'}`);
+        if (handleRouterFailureDiagnostics(currentRouterDiagnostics, safePayload.blocked_before_retrieval)) {
+          return;
+        }
+        setQaStatus(`\u5df2\u8bc6\u522b\u951a\u70b9 ${anchor.entity || '-'} / \u4e8b\u4ef6 ${scenario.event_type || '-'} / \u6a21\u5f0f ${currentQuestionDsl && currentQuestionDsl.mode || '-'}`);
         if ((!playbackController || !playbackController.traceProtocolSeen) && currentEvidenceBundle) {
           setSchemaRetrievalPlayback(currentQuestionDsl, currentEvidenceBundle);
         }
@@ -1200,6 +1261,10 @@ window.cytoscape = window.cytoscape || cytoscape;
 
       if (eventType === 'fact_query_planned') {
         const factQueries = Array.isArray(safePayload.fact_queries) ? safePayload.fact_queries : [];
+        if (currentRouterDiagnostics && String(currentRouterDiagnostics.status || '').trim() === 'failed') {
+          setQaStatus('\u56e0\u8def\u7531\u5931\u8d25\uff0c\u672a\u751f\u6210\u5b9e\u4f8b\u67e5\u8be2\u8ba1\u5212');
+          return;
+        }
         setQaStatus(`\u5df2\u751f\u6210 ${factQueries.length} \u6761\u5b9e\u4f8b\u67e5\u8be2\u8ba1\u5212`);
         return;
       }
@@ -1211,6 +1276,11 @@ window.cytoscape = window.cytoscape || cytoscape;
 
       if (eventType === 'typedb_result') {
         const factPack = safePayload.fact_pack && typeof safePayload.fact_pack === 'object' ? safePayload.fact_pack : {};
+        const metadata = factPack.metadata && typeof factPack.metadata === 'object' ? factPack.metadata : {};
+        if (metadata.blocked_before_retrieval) {
+          handleRouterFailureDiagnostics(metadata.router_diagnostics, true);
+          return;
+        }
         const counts = factPack.counts && typeof factPack.counts === 'object' ? factPack.counts : {};
         const total = Object.values(counts).reduce((sum, value) => sum + (Number(value) || 0), 0);
         setQaStatus(total > 0 ? `\u5df2\u547d\u4e2d ${total} \u6761\u5b9e\u4f8b\u7ed3\u679c` : '\u5f53\u524d\u672a\u547d\u4e2d\u5b9e\u4f8b\u7ed3\u679c');
@@ -1221,6 +1291,10 @@ window.cytoscape = window.cytoscape || cytoscape;
         currentEvidenceBundle = safePayload.evidence_bundle && typeof safePayload.evidence_bundle === 'object'
           ? safePayload.evidence_bundle
           : null;
+        if (currentRouterDiagnostics && String(currentRouterDiagnostics.status || '').trim() === 'failed') {
+          setQaStatus('\u56e0\u8def\u7531\u5931\u8d25\uff0c\u672a\u751f\u6210\u6b63\u5e38\u5b9e\u4f8b\u68c0\u7d22\u56de\u653e');
+          return;
+        }
         if ((!playbackController || !playbackController.traceProtocolSeen) && currentQuestionDsl && currentEvidenceBundle) {
           setSchemaRetrievalPlayback(currentQuestionDsl, currentEvidenceBundle);
         }
@@ -1268,12 +1342,16 @@ window.cytoscape = window.cytoscape || cytoscape;
           this.instanceQaProtocolSeen = true;
         }
         this.queue.push({ eventType, payload });
-        if (!this.running) {
+        if (!this.running && !document.hidden && !playbackVisibilityPaused) {
           this.drain();
         }
       }
 
       drain() {
+        if (document.hidden || playbackVisibilityPaused) {
+          this.running = false;
+          return;
+        }
         if (!this.queue.length) {
           this.running = false;
           return;
@@ -1288,7 +1366,18 @@ window.cytoscape = window.cytoscape || cytoscape;
         this.timers.push(timer);
       }
 
-      play(eventType, payload) {
+      flushToLatestVisibleState() {
+        clearPlaybackTimers(this);
+        const pendingItems = Array.isArray(this.queue) ? this.queue.slice() : [];
+        this.queue = [];
+        this.running = false;
+        pendingItems.forEach(item => {
+          this.play(item.eventType, item.payload, { suppressReplay: true });
+        });
+      }
+
+      play(eventType, payload, options = {}) {
+        const suppressReplay = options.suppressReplay === true;
         if (payload && payload.message) {
           setQaStatus(payload.message);
         }
@@ -1297,14 +1386,24 @@ window.cytoscape = window.cytoscape || cytoscape;
           return;
         }
         if (eventType === 'trace_anchor') {
-          replayFromSnapshot({ node_ids: payload.node_ids || [], edge_ids: payload.edge_ids || [] }, { fit: true, duration: 340 });
+          const snapshot = { node_ids: payload.node_ids || [], edge_ids: payload.edge_ids || [] };
+          if (suppressReplay) {
+            this.currentSnapshot = normalizeSnapshot(snapshot);
+          } else {
+            replayFromSnapshot(snapshot, { fit: true, duration: 340 });
+          }
           return;
         }
         if (eventType === 'trace_expand') {
-          replayFromSnapshot({
+          const snapshot = {
             node_ids: payload.snapshot_node_ids || payload.node_ids || [],
             edge_ids: payload.snapshot_edge_ids || payload.edge_ids || [],
-          }, { fit: true, duration: 340, pulseDuration: 420 });
+          };
+          if (suppressReplay) {
+            this.currentSnapshot = normalizeSnapshot(snapshot);
+          } else {
+            replayFromSnapshot(snapshot, { fit: true, duration: 340, pulseDuration: 420 });
+          }
           return;
         }
         if (eventType === 'evidence_final') {
@@ -1319,8 +1418,10 @@ window.cytoscape = window.cytoscape || cytoscape;
           if (!this.traceProtocolSeen && !this.instanceQaProtocolSeen) {
             persistFinalEvidence(payload || {});
           }
-          setQaAnswer(payload.answer_text || payload.answer || '');
-          setQaAnswerTabState(Boolean(payload.used_fallback));
+          if (!handleRouterFailureDiagnostics(payload.router_diagnostics, payload.blocked_before_retrieval)) {
+            setQaAnswer(payload.answer_text || payload.answer || '');
+            setQaAnswerTabState(Boolean(payload.used_fallback));
+          }
           if (payload.trace_summary) {
             currentTraceSummary = payload.trace_summary;
             setQaTraceSummary(payload.trace_summary);
@@ -1550,6 +1651,15 @@ window.cytoscape = window.cytoscape || cytoscape;
 
     traceResetButton.addEventListener('click', () => {
       resetToExplorationMode({ fit: false, resetInputs: false });
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (!playbackController) return;
+      if (document.hidden) {
+        pausePlaybackForHiddenDocument();
+        return;
+      }
+      resumePlaybackAfterVisibilityRestore();
     });
 
     resetButton.addEventListener('click', () => {

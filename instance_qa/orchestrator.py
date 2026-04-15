@@ -20,7 +20,13 @@ from .evidence_subgraph_builder import build_evidence_subgraph
 from .fact_query_planner import build_fact_queries, build_propagation_queries
 from .fact_query_validator import validate_fact_query_dsl
 from .question_models import AnchorRef, ConstraintRef, GoalRef, IdentifierRef, QuestionDSL, ScenarioRef
-from .question_router import QuestionRoute, load_schema_markdown, resolve_question_route, validate_question_route
+from .question_router import (
+    QuestionRoute,
+    QuestionRouteResolution,
+    load_schema_markdown,
+    resolve_question_route,
+    validate_question_route,
+)
 from .question_validator import validate_question_dsl
 from .llm_answer_context_builder import LLMAnswerContext, build_llm_answer_context
 from .reasoner import build_reasoning_result
@@ -45,6 +51,8 @@ class InstanceQAResult:
     reasoning: dict[str, object]
     trace_summary: dict[str, object]
     fallback_answer: TemplateAnswer
+    router_diagnostics: dict[str, object]
+    blocked_before_retrieval: bool
 
 
 _POWER_OUTAGE_KEYWORDS = ('\u65ad\u7535', '\u505c\u7535', '\u6389\u7535')
@@ -67,23 +75,51 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
         schema_registry,
         schema_markdown=router_schema_markdown,
     )
-    route = resolve_question_route(
-        question,
-        schema_registry,
-        schema_markdown=router_schema_markdown,
-        anchor_resolution_payload=anchor_resolution_payload,
+    route_resolution = _normalize_question_route_resolution(
+        resolve_question_route(
+            question,
+            schema_registry,
+            schema_markdown=router_schema_markdown,
+            anchor_resolution_payload=anchor_resolution_payload,
+        )
     )
-    question_dsl = _build_question_dsl(question, parsed.normalized_query, schema_registry, route=route)
+    router_failed = route_resolution.status != 'ok' or route_resolution.route is None
+    router_diagnostics = {
+        'status': route_resolution.status,
+        'error_type': route_resolution.error_type,
+        'error_message': route_resolution.error_message,
+        'used_fallback': router_failed,
+    }
+
+    if router_failed:
+        question_dsl = _build_router_failed_question_dsl(
+            question,
+            parsed.normalized_query,
+            schema_registry,
+            anchor_resolution_payload=anchor_resolution_payload,
+        )
+    else:
+        question_dsl = _build_question_dsl(
+            question,
+            parsed.normalized_query,
+            schema_registry,
+            route=route_resolution.route,
+        )
+
     if question_dsl.reasoning_scope == 'anchor_only':
         schema_retrieval_bundle = _build_anchor_only_schema_bundle(graph, question_dsl, question)
     else:
         schema_retrieval_bundle = retrieve_ontology_evidence(graph, question)
+
     question_validation_error = validate_question_dsl(question_dsl, schema_registry)
+    if router_failed:
+        failure_code = route_resolution.error_type or 'router_unknown_error'
+        question_validation_error = f'router_failed:{failure_code}'
 
     fact_query_records: list[dict[str, object]] = []
     all_rows: list[dict[str, object]] = []
 
-    if question_validation_error is None:
+    if (not router_failed) and question_validation_error is None:
         initial_queries = build_fact_queries(question_dsl, schema_registry)
         initial_rows = _execute_fact_queries(initial_queries, schema_registry, fact_query_records)
         all_rows.extend(initial_rows)
@@ -122,6 +158,8 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
             'anchor': _build_anchor_metadata(question_dsl.anchor),
             'reasoning_scope': question_dsl.reasoning_scope,
             'target_attributes': list(question_dsl.target_attributes),
+            'router_diagnostics': dict(router_diagnostics),
+            'blocked_before_retrieval': router_failed,
         }
     )
 
@@ -134,15 +172,31 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
         omitted_entities={},
         subgraph=build_evidence_subgraph(fact_pack),
         registry=schema_registry,
-        understanding=_build_evidence_understanding(question_dsl, parsed.normalized_query),
+        understanding=_build_evidence_understanding(
+            question_dsl,
+            parsed.normalized_query,
+            router_diagnostics=router_diagnostics,
+            blocked_before_retrieval=router_failed,
+        ),
     )
     llm_answer_context = build_llm_answer_context(evidence_bundle)
 
-    reasoning = build_reasoning_result(
-        fact_pack,
-        mode=question_dsl.mode,
-        deadline=question_dsl.goal.deadline,
-    )
+    if router_failed:
+        reasoning = {
+            'summary': {'answer_type': 'router_failure', 'risk_level': 'unknown', 'confidence': 'low'},
+            'affected_entities': [],
+            'impact_summary': {'direct_counts': {}, 'propagated_counts': {}},
+            'deadline_assessment': {'deadline': None, 'at_risk': False, 'reason_codes': [], 'supporting_facts': []},
+            'evidence_chains': [],
+            'router_diagnostics': dict(router_diagnostics),
+        }
+    else:
+        reasoning = build_reasoning_result(
+            fact_pack,
+            mode=question_dsl.mode,
+            deadline=question_dsl.goal.deadline,
+        )
+
     trace_summary = build_trace_summary(
         question_dsl=question_dsl,
         fact_pack=fact_pack,
@@ -164,6 +218,8 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
         reasoning=reasoning,
         trace_summary=trace_summary,
         fallback_answer=fallback_answer,
+        router_diagnostics=router_diagnostics,
+        blocked_before_retrieval=router_failed,
     )
 
 
@@ -351,6 +407,117 @@ def _resolve_anchor_resolution_payload(
     return fallback_payload
 
 
+
+def _normalize_question_route_resolution(result: object) -> QuestionRouteResolution:
+    if isinstance(result, QuestionRouteResolution):
+        return result
+    if isinstance(result, QuestionRoute):
+        return QuestionRouteResolution(status='ok', error_type='', error_message='', route=result)
+    return QuestionRouteResolution(status='failed', error_type='router_unknown_error', error_message='Router resolution unavailable.', route=None)
+
+
+def _build_router_failed_question_dsl(
+    question: str,
+    normalized_query: str,
+    schema_registry: SchemaRegistry,
+    *,
+    anchor_resolution_payload: dict[str, object] | None,
+) -> QuestionDSL:
+    anchor_entity = _safe_anchor_entity_for_router_failure(schema_registry, anchor_resolution_payload)
+    identifier = _anchor_identifier_from_resolution_payload(anchor_resolution_payload, anchor_entity)
+    deadline = _extract_deadline(normalized_query)
+    event_type = _detect_event_type(normalized_query)
+    mode = _detect_mode(normalized_query, deadline, event_type)
+    goal_type = 'yes_no_risk' if mode == 'deadline_risk_check' else ('list_impacts' if mode == 'impact_analysis' else 'instance_lookup')
+    target_attributes = _infer_target_attributes_for_router_failure(question, schema_registry, anchor_entity)
+    reasoning_scope = 'anchor_only' if identifier is not None and target_attributes else 'expand_graph'
+
+    return QuestionDSL(
+        mode=mode,
+        anchor=AnchorRef(entity=anchor_entity, identifier=identifier, surface=question),
+        scenario=ScenarioRef(event_type=event_type, duration=None, start_time=None, severity=None, raw_event=''),
+        goal=GoalRef(
+            type=goal_type,
+            target_entity=None,
+            target_metric='delivery' if mode == 'deadline_risk_check' else None,
+            deadline=deadline,
+        ),
+        constraints=ConstraintRef(statuses=[], time_window=None, limit=20),
+        reasoning_scope=reasoning_scope,
+        target_attributes=target_attributes,
+    )
+
+
+def _safe_anchor_entity_for_router_failure(
+    schema_registry: SchemaRegistry,
+    anchor_resolution_payload: dict[str, object] | None,
+) -> str:
+    if isinstance(anchor_resolution_payload, dict):
+        selected = anchor_resolution_payload.get('selected')
+        if isinstance(selected, dict):
+            selected_entity = str(selected.get('entity') or '').strip()
+            if selected_entity in schema_registry.entities:
+                return selected_entity
+        candidates = anchor_resolution_payload.get('candidates')
+        if isinstance(candidates, list):
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                entity = str(item.get('entity') or '').strip()
+                if entity in schema_registry.entities:
+                    return entity
+
+    for preferred in ('PoD', 'Room'):
+        if preferred in schema_registry.entities:
+            return preferred
+    return next(iter(schema_registry.entities), 'Room')
+
+
+def _anchor_identifier_from_resolution_payload(
+    anchor_resolution_payload: dict[str, object] | None,
+    anchor_entity: str,
+) -> IdentifierRef | None:
+    if not isinstance(anchor_resolution_payload, dict):
+        return None
+
+    selected = anchor_resolution_payload.get('selected')
+    if isinstance(selected, dict):
+        entity = str(selected.get('entity') or '').strip()
+        attribute = str(selected.get('attribute') or '').strip()
+        value = str(selected.get('value') or '').strip()
+        if entity == anchor_entity and attribute and value:
+            return IdentifierRef(attribute=attribute, value=value)
+
+    candidates = anchor_resolution_payload.get('candidates')
+    if isinstance(candidates, list):
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            entity = str(item.get('entity') or '').strip()
+            attribute = str(item.get('attribute') or '').strip()
+            value = str(item.get('value') or '').strip()
+            if entity == anchor_entity and attribute and value:
+                return IdentifierRef(attribute=attribute, value=value)
+
+    return None
+
+def _infer_target_attributes_for_router_failure(
+    question: str,
+    schema_registry: SchemaRegistry,
+    anchor_entity: str,
+) -> list[str]:
+    entity_schema = schema_registry.entities.get(anchor_entity)
+    if entity_schema is None:
+        return []
+
+    text = str(question or '')
+    if '\u72b6\u6001' in text:
+        for attribute in entity_schema.attributes:
+            if attribute.endswith('_status') or attribute == 'status':
+                return [attribute]
+    return []
+
+
 def _extract_anchor_surface_candidates(question: str) -> list[str]:
     values: list[str] = []
     seen: set[str] = set()
@@ -532,7 +699,13 @@ def _collect_schema_entities(question: QuestionDSL, fact_pack: dict[str, object]
     return deduped
 
 
-def _build_evidence_understanding(question: QuestionDSL, normalized_query: str) -> dict[str, object]:
+def _build_evidence_understanding(
+    question: QuestionDSL,
+    normalized_query: str,
+    *,
+    router_diagnostics: dict[str, object] | None = None,
+    blocked_before_retrieval: bool = False,
+) -> dict[str, object]:
     anchor = _build_anchor_metadata(question.anchor)
     return {
         'mode': question.mode,
@@ -553,6 +726,8 @@ def _build_evidence_understanding(question: QuestionDSL, normalized_query: str) 
             if question.scenario is not None
             else None
         ),
+        'router_diagnostics': dict(router_diagnostics or {}),
+        'blocked_before_retrieval': bool(blocked_before_retrieval),
     }
 
 

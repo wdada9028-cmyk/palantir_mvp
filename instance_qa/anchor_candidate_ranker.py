@@ -36,14 +36,14 @@ def build_anchor_candidate_ranker_prompt(
     normalized_question = str(question or '').strip()
     context_payload = _clip_candidate_context(candidate_context, max_candidates=max_candidates)
     sections = [
-        'You are an anchor candidate ranker for ontology-backed instance QA.',
-        'Return JSON only.',
-        'Allowed decisions: select, ambiguous, reject.',
-        'Output fields: decision, selected_candidate_id, confidence, reason.',
-        f'Question: {normalized_question}',
-        'Schema markdown:',
+        '?????????????????????????',
+        '???? JSON?',
+        '????????select?ambiguous?reject?',
+        '?????????decision?selected_candidate_id?confidence?reason?',
+        f'?????{normalized_question}',
+        'Schema ???',
         str(schema_markdown or '').strip(),
-        'Candidate context:',
+        '??????',
         json.dumps(context_payload, ensure_ascii=False, indent=2),
     ]
     return "\n\n".join(sections)
@@ -94,7 +94,7 @@ def resolve_anchor_candidate_rank(
             messages=[
                 {
                     'role': 'system',
-                    'content': 'You are a controlled anchor-candidate ranker. Return JSON only.',
+                    'content': '??????????????????? JSON?',
                 },
                 {
                     'role': 'user',

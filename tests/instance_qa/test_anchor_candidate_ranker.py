@@ -38,10 +38,10 @@ def test_build_anchor_candidate_ranker_prompt_embeds_question_schema_and_candida
         max_candidates=5,
     )
 
-    assert 'Return JSON only.' in prompt
+    assert '???? JSON?' in prompt
     assert 'pod-001的状态是什么？' in prompt
     assert '# schema markdown' in prompt
-    assert 'Candidate context:' in prompt
+    assert '??????' in prompt
     assert '"candidate_id": "cand_1"' in prompt
 
 

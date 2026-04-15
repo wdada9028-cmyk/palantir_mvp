@@ -44,6 +44,30 @@ def _write_ontology(input_file: Path) -> None:
     )
 
 
+def _patch_expand_graph_router(monkeypatch) -> None:
+    import cloud_delivery_ontology_palantir.instance_qa.orchestrator as orch
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import AnchorLocator, QuestionRoute, QuestionRouteResolution
+
+    monkeypatch.setattr(
+        orch,
+        'resolve_question_route',
+        lambda *args, **kwargs: QuestionRouteResolution(
+            status='ok',
+            error_type='',
+            error_message='',
+            route=QuestionRoute(
+                intent='relation_query',
+                anchor_entity='Room',
+                anchor_locator=AnchorLocator(match_type='name', attribute=None, value='Room'),
+                target_attributes=[],
+                reasoning_scope='expand_graph',
+                confidence=0.9,
+                why='test route',
+            ),
+        ),
+    )
+
+
 @pytest.fixture(autouse=True)
 def _disable_network_generation(monkeypatch):
     async def _fake_iter_generated_instance_answer(*args, **kwargs):
@@ -115,9 +139,11 @@ def test_instance_qa_stream_detects_deadline_mode(tmp_path: Path, deadline_keywo
 
 
 
-def test_instance_qa_stream_emits_schema_trace_events_before_typedb_queries(tmp_path: Path):
+def test_instance_qa_stream_emits_schema_trace_events_before_typedb_queries(tmp_path: Path, monkeypatch):
     input_file = tmp_path / 'ontology.md'
     _write_ontology(input_file)
+
+    _patch_expand_graph_router(monkeypatch)
 
     app = create_app(input_file=input_file)
     client = TestClient(app)
@@ -131,9 +157,11 @@ def test_instance_qa_stream_emits_schema_trace_events_before_typedb_queries(tmp_
     assert text.index('event: evidence_final') < text.index('event: fact_query_planned')
 
 
-def test_instance_qa_stream_trace_expand_payload_uses_search_trace_snapshots(tmp_path: Path):
+def test_instance_qa_stream_trace_expand_payload_uses_search_trace_snapshots(tmp_path: Path, monkeypatch):
     input_file = tmp_path / 'ontology.md'
     _write_ontology(input_file)
+
+    _patch_expand_graph_router(monkeypatch)
 
     app = create_app(input_file=input_file)
     client = TestClient(app)
@@ -296,9 +324,11 @@ def test_instance_qa_stream_attribute_lookup_schema_trace_stays_on_anchor_only(t
 
 
 
-def test_instance_qa_stream_emits_clean_schema_trace_messages(tmp_path: Path):
+def test_instance_qa_stream_emits_clean_schema_trace_messages(tmp_path: Path, monkeypatch):
     input_file = tmp_path / 'ontology.md'
     _write_ontology(input_file)
+
+    _patch_expand_graph_router(monkeypatch)
 
     app = create_app(input_file=input_file)
     client = TestClient(app)
@@ -730,3 +760,75 @@ Attributes:
     response = client.get('/api/qa/stream', params={'q': 'pod-001?pod-002??????'})
 
     assert response.status_code == 200
+
+
+def test_instance_qa_stream_router_failure_does_not_fallback_to_project(tmp_path: Path, monkeypatch):
+    input_file = tmp_path / 'ontology.md'
+    _write_ontology(input_file)
+
+    import cloud_delivery_ontology_palantir.instance_qa.orchestrator as orch
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import QuestionRouteResolution
+
+    monkeypatch.setattr(
+        orch,
+        'resolve_question_route',
+        lambda *args, **kwargs: QuestionRouteResolution(
+            status='failed',
+            error_type='router_timeout',
+            error_message='timeout',
+            route=None,
+        ),
+    )
+    monkeypatch.setattr(orch, '_resolve_anchor_resolution_payload', lambda *args, **kwargs: None)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'POD-001???????'})
+
+    assert response.status_code == 200
+    question_payload = _event_payloads(response.text, 'question_dsl')[0]
+    assert question_payload['question_dsl']['anchor']['entity'] != 'Project'
+
+    planned_payload = _event_payloads(response.text, 'fact_query_planned')[0]
+    assert planned_payload['fact_queries'] == []
+
+    typedb_payload = _event_payloads(response.text, 'typedb_result')[0]
+    assert typedb_payload['fact_pack']['metadata']['blocked_before_retrieval'] is True
+    assert typedb_payload['fact_pack']['metadata']['router_diagnostics']['error_type'] == 'router_timeout'
+
+
+def test_instance_qa_stream_exposes_router_failure_diagnostics_and_skips_schema_trace(tmp_path: Path, monkeypatch):
+    input_file = tmp_path / 'ontology.md'
+    _write_ontology(input_file)
+
+    import cloud_delivery_ontology_palantir.instance_qa.orchestrator as orch
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import QuestionRouteResolution
+
+    monkeypatch.setattr(
+        orch,
+        'resolve_question_route',
+        lambda *args, **kwargs: QuestionRouteResolution(
+            status='failed',
+            error_type='router_timeout',
+            error_message='timeout',
+            route=None,
+        ),
+    )
+    monkeypatch.setattr(orch, '_resolve_anchor_resolution_payload', lambda *args, **kwargs: None)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'POD-001???????'})
+
+    assert response.status_code == 200
+    text = response.text
+    assert 'event: trace_anchor' not in text
+    assert 'event: trace_expand' not in text
+    assert 'event: evidence_final' not in text
+
+    question_payload = _event_payloads(text, 'question_dsl')[0]
+    assert question_payload['router_diagnostics']['error_type'] == 'router_timeout'
+
+    answer_payload = _event_payloads(text, 'answer_done')[0]
+    assert answer_payload['router_diagnostics']['error_type'] == 'router_timeout'
+    assert answer_payload['blocked_before_retrieval'] is True

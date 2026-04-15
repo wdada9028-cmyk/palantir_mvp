@@ -489,3 +489,26 @@ def test_exported_html_uses_clean_qa_copy_and_formats_answer_text(tmp_path: Path
     assert '\*\*([^*]+)\*\*' in text
     for bad in ['????', '????', '???', '???', '????', '??']:
         assert bad not in text
+
+
+def test_exported_html_skips_backlog_playback_after_visibility_restore(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert "document.addEventListener('visibilitychange'" in text
+    assert 'pausePlaybackForHiddenDocument' in text
+    assert 'resumePlaybackAfterVisibilityRestore' in text
+    assert 'playbackController.queue = []' in text
+    assert 'replayFromSnapshot(finalSnapshot, { fit: true, duration: 0, pulseDuration: 0 })' in text
+
+
+def test_exported_html_contains_router_failure_status_handling(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'currentRouterDiagnostics' in text
+    assert 'handleRouterFailureDiagnostics' in text
+    assert '路由识别失败' in text
+    assert '因路由失败，未生成实例查询计划' in text
