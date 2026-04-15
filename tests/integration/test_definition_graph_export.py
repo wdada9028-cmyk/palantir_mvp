@@ -503,6 +503,18 @@ def test_exported_html_skips_backlog_playback_after_visibility_restore(tmp_path:
     assert 'replayFromSnapshot(finalSnapshot, { fit: true, duration: 0, pulseDuration: 0 })' in text
 
 
+def test_exported_html_derives_snapshot_edges_from_highlighted_nodes(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert 'function deriveIncrementalEdgeIds' in text
+    assert 'duration: 420' in text
+    assert 'pulseDuration: 580' in text
+    assert 'deriveIncrementalEdgeIds(seedNodeIds, seedNodeIds)' in text
+    assert 'deriveIncrementalEdgeIds(stepNodeIds, snapshotNodeIds, previousSnapshot.edge_ids || [])' in text
+
+
 def test_exported_html_contains_router_failure_status_handling(tmp_path: Path):
     graph = OntologyGraph(metadata={'title': 'Ontology'})
     output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')

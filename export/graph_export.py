@@ -850,7 +850,7 @@ window.cytoscape = window.cytoscape || cytoscape;
       const snapshots = new Map();
       const seedNodeIds = Array.isArray(searchTrace && searchTrace.seed_node_ids) ? searchTrace.seed_node_ids : [];
       const expansionSteps = Array.isArray(searchTrace && searchTrace.expansion_steps) ? searchTrace.expansion_steps : [];
-      const seedSnapshot = normalizeSnapshot({ node_ids: seedNodeIds, edge_ids: [] });
+      const seedSnapshot = normalizeSnapshot({ node_ids: seedNodeIds, edge_ids: mergeUniqueIds(deriveIncrementalEdgeIds(seedNodeIds, seedNodeIds)) });
       let relationIndex = 0;
       let latestSnapshot = seedSnapshot;
       (chain || []).forEach(item => {
@@ -862,10 +862,12 @@ window.cytoscape = window.cytoscape || cytoscape;
           relationIndex += 1;
           snapshot = normalizeSnapshot({
             node_ids: traceStep.snapshot_node_ids || item.node_ids || [],
-            edge_ids: traceStep.snapshot_edge_ids || item.edge_ids || [],
+            edge_ids: (traceStep.snapshot_edge_ids || item.edge_ids || []).concat(deriveEdgeIdsForNodeSnapshot(traceStep.snapshot_node_ids || item.node_ids || [])),
           });
         } else if (item && item.evidence_id) {
-          snapshot = normalizeSnapshot({ node_ids: item.node_ids || [], edge_ids: item.edge_ids || [] });
+          const combinedNodeIds = mergeUniqueIds(latestSnapshot.node_ids || [], item.node_ids || []);
+          const incrementalEdgeIds = mergeUniqueIds(item.edge_ids || [], deriveIncrementalEdgeIds(item.node_ids || [], combinedNodeIds, latestSnapshot.edge_ids || []));
+          snapshot = normalizeSnapshot({ node_ids: combinedNodeIds, edge_ids: mergeUniqueIds(latestSnapshot.edge_ids || [], incrementalEdgeIds) });
         }
         latestSnapshot = snapshot;
         if (item && item.evidence_id) {
@@ -909,7 +911,7 @@ window.cytoscape = window.cytoscape || cytoscape;
       const item = persistedEvidenceChain[safeIndex] || {};
       const snapshot = evidenceSnapshots.get(item.evidence_id) || { node_ids: [], edge_ids: [] };
       if (options.replay !== false && hasSnapshotData(snapshot)) {
-        replayFromSnapshot(snapshot, { fit: true, duration: 280, pulseDuration: 420 });
+        replayFromSnapshot(snapshot, { fit: true, duration: 420, pulseDuration: 580 });
       }
       if (options.setStatus !== false) {
         setQaStatus(`检索步骤 ${safeIndex + 1}/${persistedEvidenceChain.length}：${item.label || item.kind || '证据'}`);
@@ -995,10 +997,14 @@ window.cytoscape = window.cytoscape || cytoscape;
         const relation = String(edge.data('relation') || '').trim();
         const sourceName = String(sourceNode.data('display_name') || '').trim();
         const targetName = String(targetNode.data('display_name') || '').trim();
+        const sourceEntity = String(sourceNode.data('name') || '').trim();
+        const targetEntity = String(targetNode.data('name') || '').trim();
         const matched = matchers.some(item => {
           const relationMatches = !item.relation || String(item.relation).trim() === relation;
-          const sourceMatches = !item.source || String(item.source).trim() === sourceName;
-          const targetMatches = !item.target || String(item.target).trim() === targetName;
+          const sourceValue = String(item.source || '').trim();
+          const targetValue = String(item.target || '').trim();
+          const sourceMatches = !sourceValue || sourceValue === sourceName || sourceValue === sourceEntity;
+          const targetMatches = !targetValue || targetValue === targetName || targetValue === targetEntity;
           return relationMatches && sourceMatches && targetMatches;
         });
         if (matched) {
@@ -1006,6 +1012,39 @@ window.cytoscape = window.cytoscape || cytoscape;
         }
       });
       return [...new Set(edgeIds)];
+    }
+
+    function deriveIncrementalEdgeIds(stepNodeIds, snapshotNodeIds, existingEdgeIds = []) {
+      const newNodeSet = new Set((stepNodeIds || []).map(id => String(id || '').trim()).filter(Boolean));
+      const snapshotNodeSet = new Set((snapshotNodeIds || []).map(id => String(id || '').trim()).filter(Boolean));
+      const existingEdgeSet = new Set((existingEdgeIds || []).map(id => String(id || '').trim()).filter(Boolean));
+      if (!newNodeSet.size || !snapshotNodeSet.size) return [];
+      const edgeIds = [];
+      cy.edges().forEach(edge => {
+        if (edge.style('display') === 'none') return;
+        const edgeId = String(edge.id() || '').trim();
+        if (existingEdgeSet.has(edgeId)) return;
+        const sourceId = String(edge.source().id() || '').trim();
+        const targetId = String(edge.target().id() || '').trim();
+        if (!snapshotNodeSet.has(sourceId) || !snapshotNodeSet.has(targetId)) return;
+        if (!newNodeSet.has(sourceId) && !newNodeSet.has(targetId)) return;
+        edgeIds.push(edgeId);
+      });
+      return [...new Set(edgeIds)];
+    }
+
+    function mergeUniqueIds(...collections) {
+      const result = [];
+      const seen = new Set();
+      collections.forEach(items => {
+        (items || []).forEach(item => {
+          const value = String(item || '').trim();
+          if (!value || seen.has(value)) return;
+          seen.add(value);
+          result.push(value);
+        });
+      });
+      return result;
     }
 
     function buildTypedbResultSnapshot(factPack) {
@@ -1386,23 +1425,34 @@ window.cytoscape = window.cytoscape || cytoscape;
           return;
         }
         if (eventType === 'trace_anchor') {
-          const snapshot = { node_ids: payload.node_ids || [], edge_ids: payload.edge_ids || [] };
-          if (suppressReplay) {
-            this.currentSnapshot = normalizeSnapshot(snapshot);
-          } else {
-            replayFromSnapshot(snapshot, { fit: true, duration: 340 });
+          const snapshotNodeIds = payload.node_ids || [];
+          const snapshot = normalizeSnapshot({
+            node_ids: snapshotNodeIds,
+            edge_ids: mergeUniqueIds(payload.edge_ids || [], deriveIncrementalEdgeIds(snapshotNodeIds, snapshotNodeIds)),
+          });
+          this.currentSnapshot = snapshot;
+          if (!suppressReplay) {
+            replayFromSnapshot(snapshot, { fit: true, duration: 420 });
           }
           return;
         }
         if (eventType === 'trace_expand') {
-          const snapshot = {
-            node_ids: payload.snapshot_node_ids || payload.node_ids || [],
-            edge_ids: payload.snapshot_edge_ids || payload.edge_ids || [],
-          };
-          if (suppressReplay) {
-            this.currentSnapshot = normalizeSnapshot(snapshot);
-          } else {
-            replayFromSnapshot(snapshot, { fit: true, duration: 340, pulseDuration: 420 });
+          const snapshotNodeIds = payload.snapshot_node_ids || payload.node_ids || [];
+          const previousSnapshot = normalizeSnapshot(this.currentSnapshot || { node_ids: [], edge_ids: [] });
+          const stepNodeIds = Array.isArray(payload.node_ids) && payload.node_ids.length
+            ? payload.node_ids
+            : snapshotNodeIds.filter(id => !previousSnapshot.node_ids.includes(id));
+          const incrementalEdgeIds = mergeUniqueIds(
+            payload.edge_ids || [],
+            deriveIncrementalEdgeIds(stepNodeIds, snapshotNodeIds, previousSnapshot.edge_ids || []),
+          );
+          const snapshot = normalizeSnapshot({
+            node_ids: snapshotNodeIds,
+            edge_ids: mergeUniqueIds(payload.snapshot_edge_ids || [], previousSnapshot.edge_ids || [], incrementalEdgeIds),
+          });
+          this.currentSnapshot = snapshot;
+          if (!suppressReplay) {
+            replayFromSnapshot(snapshot, { fit: true, duration: 420, pulseDuration: 580 });
           }
           return;
         }

@@ -144,6 +144,262 @@ def _llm_context_to_dict(result: InstanceQAResult) -> dict[str, object]:
 def _build_schema_trace_events(result: InstanceQAResult, *, session_id: str, start_step: int) -> tuple[list[str], int]:
     if result.blocked_before_retrieval:
         return [], start_step
+
+    evidence_trace = _build_instance_evidence_trace_events(result, session_id=session_id, start_step=start_step)
+    if evidence_trace is not None:
+        return evidence_trace
+
+    return _build_legacy_schema_trace_events(result, session_id=session_id, start_step=start_step)
+
+
+
+def _build_instance_evidence_trace_events(result: InstanceQAResult, *, session_id: str, start_step: int) -> tuple[list[str], int] | None:
+    question_dsl = getattr(result, 'question_dsl', None)
+    if question_dsl is None or str(getattr(question_dsl, 'reasoning_scope', '') or '').strip() != 'expand_graph':
+        return None
+
+    fact_pack = result.fact_pack if isinstance(result.fact_pack, dict) else {}
+    instances = fact_pack.get('instances') if isinstance(fact_pack, dict) else {}
+    if not isinstance(instances, dict) or not instances:
+        return None
+
+    anchor = getattr(question_dsl, 'anchor', None)
+    anchor_entity = str(getattr(anchor, 'entity', '') or '').strip()
+    anchor_node_id = _entity_node_id(anchor_entity) if anchor_entity else ''
+    if not anchor_node_id:
+        return None
+
+    direct_entities, propagated_entities = _build_impact_playback_groups(result, anchor_entity)
+    label_for = lambda entity: _entity_label(result, entity)
+
+    events: list[str] = []
+    evidence_chain: list[dict[str, object]] = []
+    step = start_step
+    snapshot_node_ids: list[str] = [anchor_node_id]
+    evidence_index = 1
+
+    anchor_message = f'\u5df2\u5b9a\u4f4d\u8d77\u70b9\u5b9e\u4f53\uff1a{label_for(anchor_entity)}'
+    step += 1
+    events.append(sse_event('trace_anchor', {
+        'session_id': session_id,
+        'step': step,
+        'message': anchor_message,
+        'node_ids': [anchor_node_id],
+        'edge_ids': [],
+        'snapshot_node_ids': list(snapshot_node_ids),
+        'snapshot_edge_ids': [],
+        'delay_ms': 600,
+    }))
+    evidence_chain.append({
+        'evidence_id': f'E{evidence_index}',
+        'kind': 'seed',
+        'label': label_for(anchor_entity),
+        'message': anchor_message,
+        'node_ids': [anchor_node_id],
+        'edge_ids': [],
+        'why_matched': ['\u6700\u7ec8\u5b9e\u4f8b\u8bc1\u636e\u7684\u8d77\u70b9\u5b9e\u4f53'],
+    })
+    evidence_index += 1
+
+    if direct_entities:
+        step, evidence_index = _append_entity_group_events(
+            events,
+            evidence_chain,
+            session_id=session_id,
+            step=step,
+            evidence_index=evidence_index,
+            snapshot_node_ids=snapshot_node_ids,
+            group_message='\u6b63\u5728\u5c55\u5f00\u76f4\u63a5\u5f71\u54cd\u5b9e\u4f53',
+            item_prefix='\u76f4\u63a5\u5f71\u54cd\u5b9e\u4f53\uff1a',
+            entities=direct_entities,
+            label_for=label_for,
+        )
+    if propagated_entities:
+        step, evidence_index = _append_entity_group_events(
+            events,
+            evidence_chain,
+            session_id=session_id,
+            step=step,
+            evidence_index=evidence_index,
+            snapshot_node_ids=snapshot_node_ids,
+            group_message='\u6b63\u5728\u5c55\u5f00\u4f20\u64ad\u5f71\u54cd\u5b9e\u4f53',
+            item_prefix='\u4f20\u64ad\u5f71\u54cd\u5b9e\u4f53\uff1a',
+            entities=propagated_entities,
+            label_for=label_for,
+        )
+
+    if len(snapshot_node_ids) <= 1:
+        return None
+
+    step += 1
+    events.append(sse_event('evidence_final', {
+        'session_id': session_id,
+        'step': step,
+        'message': '\u5df2\u5b8c\u6210\u5f71\u54cd\u8303\u56f4\u5b9a\u4f4d',
+        'evidence_chain': evidence_chain,
+        'search_trace': {
+            'seed_node_ids': [anchor_node_id],
+            'seed_resolution_source': 'instance_evidence',
+            'seed_resolution_reasoning': 'final_instance_evidence_playback',
+            'seed_resolution_error': '',
+            'expansion_steps': [],
+        },
+    }))
+
+    return events, step
+
+
+
+def _append_entity_group_events(
+    events: list[str],
+    evidence_chain: list[dict[str, object]],
+    *,
+    session_id: str,
+    step: int,
+    evidence_index: int,
+    snapshot_node_ids: list[str],
+    group_message: str,
+    item_prefix: str,
+    entities: list[str],
+    label_for,
+) -> tuple[int, int]:
+    step += 1
+    events.append(sse_event('trace_expand', {
+        'session_id': session_id,
+        'step': step,
+        'message': group_message,
+        'node_ids': list(snapshot_node_ids),
+        'edge_ids': [],
+        'snapshot_node_ids': list(snapshot_node_ids),
+        'snapshot_edge_ids': [],
+        'delay_ms': 600,
+    }))
+    evidence_chain.append({
+        'evidence_id': f'E{evidence_index}',
+        'kind': 'group',
+        'label': group_message,
+        'message': group_message,
+        'node_ids': [],
+        'edge_ids': [],
+        'why_matched': [],
+    })
+    evidence_index += 1
+
+    for entity in entities:
+        node_id = _entity_node_id(entity)
+        if not node_id:
+            continue
+        if node_id not in snapshot_node_ids:
+            snapshot_node_ids.append(node_id)
+        message = f'{item_prefix}{label_for(entity)}'
+        step += 1
+        events.append(sse_event('trace_expand', {
+            'session_id': session_id,
+            'step': step,
+            'message': message,
+            'node_ids': [node_id],
+            'edge_ids': [],
+            'snapshot_node_ids': list(snapshot_node_ids),
+            'snapshot_edge_ids': [],
+            'delay_ms': 600,
+        }))
+        evidence_chain.append({
+            'evidence_id': f'E{evidence_index}',
+            'kind': 'entity',
+            'label': label_for(entity),
+            'message': message,
+            'node_ids': [node_id],
+            'edge_ids': [],
+            'why_matched': ['????????'],
+        })
+        evidence_index += 1
+
+    return step, evidence_index
+
+
+
+def _build_impact_playback_groups(result: InstanceQAResult, anchor_entity: str) -> tuple[list[str], list[str]]:
+    reasoning = result.reasoning if isinstance(result.reasoning, dict) else {}
+    impact_summary = reasoning.get('impact_summary') if isinstance(reasoning.get('impact_summary'), dict) else {}
+    affected_entities = reasoning.get('affected_entities') if isinstance(reasoning.get('affected_entities'), list) else []
+    fact_pack = result.fact_pack if isinstance(result.fact_pack, dict) else {}
+    instances = fact_pack.get('instances') if isinstance(fact_pack.get('instances'), dict) else {}
+
+    direct_entities: list[str] = []
+    propagated_entities: list[str] = []
+    seen_direct: set[str] = set()
+    seen_propagated: set[str] = set()
+
+    def push(target: list[str], seen: set[str], entity: str):
+        text = str(entity or '').strip()
+        if not text or text == anchor_entity or text in seen:
+            return
+        seen.add(text)
+        target.append(text)
+
+    if isinstance(impact_summary, dict):
+        for entity in (impact_summary.get('direct_counts') or {}).keys():
+            push(direct_entities, seen_direct, entity)
+        for entity in (impact_summary.get('propagated_counts') or {}).keys():
+            push(propagated_entities, seen_propagated, entity)
+
+    for item in affected_entities:
+        if not isinstance(item, dict):
+            continue
+        entity = str(item.get('entity') or '').strip()
+        depth = int(item.get('depth') or 1)
+        if depth <= 1:
+            push(direct_entities, seen_direct, entity)
+        else:
+            push(propagated_entities, seen_propagated, entity)
+
+    if isinstance(instances, dict):
+        for entity in instances.keys():
+            text = str(entity or '').strip()
+            if not text or text == anchor_entity or text in seen_direct or text in seen_propagated:
+                continue
+            push(direct_entities, seen_direct, text)
+
+    return direct_entities, propagated_entities
+
+
+
+def _entity_node_id(entity: str) -> str:
+    text = str(entity or '').strip()
+    return f'object_type:{text}' if text else ''
+
+
+
+def _entity_label(result: InstanceQAResult, entity: str) -> str:
+    target = str(entity or '').strip()
+    if not target:
+        return ''
+
+    bundle = getattr(result, 'evidence_bundle', None)
+    positive = getattr(bundle, 'positive_evidence', []) if bundle is not None else []
+    for group in positive if isinstance(positive, list) else []:
+        if getattr(group, 'entity', '') != target:
+            continue
+        instances = getattr(group, 'instances', [])
+        for item in instances if isinstance(instances, list) else []:
+            schema_context = getattr(item, 'schema_context', None)
+            entity_zh = str(getattr(schema_context, 'entity_zh', '') or '').strip()
+            if entity_zh:
+                return entity_zh
+
+    display_name_map = getattr(result.schema_retrieval_bundle, 'display_name_map', {})
+    raw = str(display_name_map.get(_entity_node_id(target), '') or '').strip()
+    if raw:
+        suffix = f'({target})'
+        if raw.endswith(suffix):
+            raw = raw[:-len(suffix)].strip()
+        if raw:
+            return raw
+    return target
+
+
+
+def _build_legacy_schema_trace_events(result: InstanceQAResult, *, session_id: str, start_step: int) -> tuple[list[str], int]:
     bundle = result.schema_retrieval_bundle
     search_trace = bundle.search_trace
     events: list[str] = []
@@ -173,7 +429,7 @@ def _build_schema_trace_events(result: InstanceQAResult, *, session_id: str, sta
             'edge_ids': [item.edge_id],
             'snapshot_node_ids': list(item.snapshot_node_ids),
             'snapshot_edge_ids': list(item.snapshot_edge_ids),
-            'delay_ms': 380,
+            'delay_ms': 600,
         }))
 
     if seed_node_ids or search_trace.expansion_steps:
@@ -187,7 +443,6 @@ def _build_schema_trace_events(result: InstanceQAResult, *, session_id: str, sta
         }))
 
     return events, step
-
 
 
 
