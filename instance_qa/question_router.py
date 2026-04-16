@@ -14,6 +14,24 @@ _ALLOWED_SCOPES = ('anchor_only', 'expand_graph')
 _DEFAULT_MODEL = 'qwen3.6-plus'
 _DEFAULT_TIMEOUT_S = 120.0
 _DEFAULT_MAX_RETRIES = 2
+_ROUTER_PROMPT_VERSION = 'v1'
+_ROUTER_PROMPT_PREFIX_CACHE: dict[str, str] = {}
+_SYSTEM_ROUTER_INSTRUCTION = '????????????????? JSON?'
+_EXPLICIT_CACHE_SUPPORTED_MODELS = frozenset({
+    'qwen3-max',
+    'qwen3.6-plus',
+    'qwen3.5-plus',
+    'qwen-plus',
+    'qwen3.5-flash',
+    'qwen-flash',
+    'qwen3-coder-plus',
+    'qwen3-coder-flash',
+    'qwen3-vl-plus',
+    'qwen3-vl-flash',
+    'deepseek-v3.2',
+    'kimi-k2.5',
+    'glm-5.1',
+})
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,12 +131,10 @@ def validate_question_route(route: QuestionRoute, schema_registry: SchemaRegistr
     return None
 
 
-def build_question_router_prompt(
+def build_question_router_prompt_prefix(
     schema_registry: SchemaRegistry,
-    raw_query: str,
     *,
     schema_markdown: str = '',
-    anchor_resolution_payload: dict[str, object] | None = None,
 ) -> str:
     schema_payload = {
         entity_name: {
@@ -130,7 +146,7 @@ def build_question_router_prompt(
     }
     examples = [
         {
-            'question': 'POD-001???????',
+            'question': 'POD-001\u7684\u72b6\u6001\u662f\u4ec0\u4e48\uff1f',
             'output': {
                 'intent': 'attribute_lookup',
                 'anchor_entity': 'PoD',
@@ -138,11 +154,11 @@ def build_question_router_prompt(
                 'target_attributes': ['pod_status'],
                 'reasoning_scope': 'anchor_only',
                 'confidence': 0.97,
-                'why': '?????????????????',
+                'why': '\u7528\u6237\u5728\u8be2\u95ee\u67d0\u4e2a\u5177\u4f53\u5b9e\u4f8b\u7684\u5355\u4e00\u5c5e\u6027\u3002',
             },
         },
         {
-            'question': 'L1-A??????????????',
+            'question': 'L1-A\u673a\u623f\u65ad\u7535\u4e00\u5468\uff0c\u4f1a\u6709\u54ea\u4e9b\u5f71\u54cd\uff1f',
             'output': {
                 'intent': 'impact_analysis',
                 'anchor_entity': 'Room',
@@ -150,7 +166,7 @@ def build_question_router_prompt(
                 'target_attributes': [],
                 'reasoning_scope': 'expand_graph',
                 'confidence': 0.96,
-                'why': '?????????????????????',
+                'why': '\u7528\u6237\u5728\u8be2\u95ee\u4e0b\u6e38\u5f71\u54cd\u5206\u6790\uff0c\u800c\u4e0d\u662f\u5355\u4e00\u5b57\u6bb5\u503c\u3002',
             },
         },
     ]
@@ -160,28 +176,113 @@ def build_question_router_prompt(
         'allowed_reasoning_scopes': list(_ALLOWED_SCOPES),
         'schema_entities': schema_payload,
         'examples': examples,
-        'query': raw_query,
     }
     sections = [
-        '???????????????????????',
-        '???? JSON?',
-        'anchor_entity ? target_attributes ?????? schema ????',
-        '??????????????????????? attribute_lookup + anchor_only?',
-        '??????????????????????? impact_analysis / relation_query / instance_lookup + expand_graph?',
-        '?????',
+        '\u4f60\u662f\u4e00\u4e2a\u9762\u5411\u672c\u4f53\u9a71\u52a8\u5b9e\u4f8b\u95ee\u7b54\u7cfb\u7edf\u7684\u95ee\u9898\u8def\u7531\u5668\u3002',
+        '\u53ea\u80fd\u8fd4\u56de JSON\u3002',
+        'anchor_entity \u548c target_attributes \u53ea\u80fd\u4ece\u63d0\u4f9b\u7684 schema \u4e2d\u9009\u62e9\u3002',
+        '\u5f53\u7528\u6237\u8be2\u95ee\u67d0\u4e2a\u5177\u4f53\u5b9e\u4f8b\u7684\u5355\u4e00\u5c5e\u6027\u6216\u72b6\u6001\u65f6\uff0c\u4f7f\u7528 attribute_lookup + anchor_only\u3002',
+        '\u5f53\u7528\u6237\u8be2\u95ee\u5f71\u54cd\u3001\u4f9d\u8d56\u3001\u5173\u7cfb\u6216\u591a\u8df3\u4e0a\u4e0b\u6587\u65f6\uff0c\u4f7f\u7528 impact_analysis / relation_query / instance_lookup + expand_graph\u3002',
+        '\u53d7\u63a7\u8f93\u5165\uff1a',
         json.dumps(payload, ensure_ascii=False, indent=2),
+    ]
+    if schema_markdown.strip():
+        sections.extend(['Schema \u8bf4\u660e\uff1a', schema_markdown.strip()])
+    return '\n\n'.join(sections)
+
+
+
+def build_question_router_prompt_suffix(
+    raw_query: str,
+    *,
+    anchor_resolution_payload: dict[str, object] | None = None,
+) -> str:
+    sections = [
+        f'\u5f53\u524d\u7528\u6237\u95ee\u9898\uff1a{raw_query}',
     ]
     if anchor_resolution_payload:
         sections.extend([
-            '?????????',
+            '\u951a\u70b9\u5019\u9009\u89e3\u6790\u7ed3\u679c\uff1a',
             json.dumps(anchor_resolution_payload, ensure_ascii=False, indent=2),
-            '?? anchor_resolution_payload.selection.decision ? "select"?? confidence_tier ? "high"????? anchor_resolution_payload.selected ?? anchor_locator?',
-            '?? anchor_resolution_payload.selection.decision ? "ambiguous"???????????????????',
-            '?? anchor_resolution_payload.selection ??????? schema + ???????',
+            '\u5982\u679c anchor_resolution_payload.selection.decision \u662f "select"\uff0c\u4e14 confidence_tier \u662f "high"\uff0c\u4f18\u5148\u91c7\u7528 anchor_resolution_payload.selected \u4f5c\u4e3a anchor_locator\u3002',
+            '\u5982\u679c anchor_resolution_payload.selection.decision \u662f "ambiguous"\uff0c\u4e0d\u8981\u5f3a\u884c\u9009\u62e9\u67d0\u4e2a\u951a\u70b9\uff0c\u8fd4\u56de\u4fdd\u5b88\u8def\u7531\u3002',
+            '\u5982\u679c anchor_resolution_payload.selection \u7f3a\u5931\uff0c\u5219\u9000\u56de\u5230 schema + \u95ee\u9898\u8bed\u4e49\u7406\u89e3\u3002',
         ])
-    if schema_markdown.strip():
-        sections.extend(['Schema ???', schema_markdown.strip()])
-    return '\\n\\n'.join(sections)
+    return '\n\n'.join(sections)
+
+
+
+def _router_prompt_prefix_cache_key(schema_markdown: str) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    digest.update(_ROUTER_PROMPT_VERSION.encode('utf-8'))
+    digest.update(b'\n')
+    digest.update(schema_markdown.encode('utf-8'))
+    return digest.hexdigest()
+
+
+
+def get_cached_question_router_prompt_prefix(
+    schema_registry: SchemaRegistry,
+    *,
+    schema_markdown: str = '',
+) -> str:
+    cache_key = _router_prompt_prefix_cache_key(schema_markdown)
+    cached = _ROUTER_PROMPT_PREFIX_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    prefix = build_question_router_prompt_prefix(schema_registry, schema_markdown=schema_markdown)
+    _ROUTER_PROMPT_PREFIX_CACHE[cache_key] = prefix
+    return prefix
+
+
+
+def build_question_router_prompt(
+    schema_registry: SchemaRegistry,
+    raw_query: str,
+    *,
+    schema_markdown: str = '',
+    anchor_resolution_payload: dict[str, object] | None = None,
+) -> str:
+    prefix = get_cached_question_router_prompt_prefix(schema_registry, schema_markdown=schema_markdown)
+    suffix = build_question_router_prompt_suffix(
+        raw_query,
+        anchor_resolution_payload=anchor_resolution_payload,
+    )
+    return '\n\n'.join(part for part in (prefix, suffix) if part.strip())
+
+
+
+def _supports_explicit_prompt_cache(model: str) -> bool:
+    return model.strip().lower() in _EXPLICIT_CACHE_SUPPORTED_MODELS
+
+
+
+def build_question_router_messages(
+    schema_registry: SchemaRegistry,
+    raw_query: str,
+    *,
+    model: str,
+    schema_markdown: str = '',
+    anchor_resolution_payload: dict[str, object] | None = None,
+) -> list[dict[str, object]]:
+    prefix = get_cached_question_router_prompt_prefix(schema_registry, schema_markdown=schema_markdown)
+    suffix = build_question_router_prompt_suffix(
+        raw_query,
+        anchor_resolution_payload=anchor_resolution_payload,
+    )
+    if _supports_explicit_prompt_cache(model):
+        user_content: object = [
+            {'type': 'text', 'text': prefix, 'cache_control': {'type': 'ephemeral'}},
+            {'type': 'text', 'text': suffix},
+        ]
+    else:
+        user_content = '\n\n'.join(part for part in (prefix, suffix) if part.strip())
+    return [
+        {'role': 'system', 'content': _SYSTEM_ROUTER_INSTRUCTION},
+        {'role': 'user', 'content': user_content},
+    ]
 
 
 
@@ -202,21 +303,13 @@ def resolve_question_route(
             model=config.model,
             temperature=0.0,
             response_format={'type': 'json_object'},
-            messages=[
-                {
-                    'role': 'system',
-                    'content': '????????????????? JSON?',
-                },
-                {
-                    'role': 'user',
-                    'content': build_question_router_prompt(
-                        schema_registry,
-                        raw_query,
-                        schema_markdown=schema_markdown,
-                        anchor_resolution_payload=anchor_resolution_payload,
-                    ),
-                },
-            ],
+            messages=build_question_router_messages(
+                schema_registry,
+                raw_query,
+                model=config.model,
+                schema_markdown=schema_markdown,
+                anchor_resolution_payload=anchor_resolution_payload,
+            ),
             timeout=timeout_s,
         )
         content = _extract_message_content(response)
