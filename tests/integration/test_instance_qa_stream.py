@@ -79,6 +79,81 @@ def _disable_network_generation(monkeypatch):
     )
 
 
+
+
+def test_instance_qa_stream_reuses_single_typedb_client_per_request(tmp_path: Path, monkeypatch):
+    input_file = tmp_path / 'ontology.md'
+    _write_ontology(input_file)
+
+    import cloud_delivery_ontology_palantir.instance_qa.orchestrator as orch
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import AnchorLocator, QuestionRoute, QuestionRouteResolution
+    from cloud_delivery_ontology_palantir.instance_qa.typedb_client import TypeDBConfig
+
+    class FakeTypeDBClient:
+        connect_calls = 0
+        close_calls = 0
+        execute_calls = 0
+
+        def __init__(self, config):
+            self.config = config
+            self.connected = False
+
+        def connect(self):
+            type(self).connect_calls += 1
+            self.connected = True
+
+        def close(self):
+            type(self).close_calls += 1
+            self.connected = False
+
+        def __enter__(self):
+            self.connect()
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.close()
+            return False
+
+        def execute_readonly(self, typeql: str):
+            type(self).execute_calls += 1
+            if '$root isa room;' in typeql and '$root has room-id "Room";' in typeql:
+                return [{'_entity': 'Room', '_iid': 'iid-room', 'room_id': 'Room'}]
+            if 'work-assignment-room' in typeql or '$n1 isa work-assignment;' in typeql:
+                return [{'_entity': 'WorkAssignment', '_iid': 'iid-wa', 'assignment_id': 'WA-001'}]
+            return []
+
+    monkeypatch.setattr(orch, 'TypeDBClient', FakeTypeDBClient)
+    monkeypatch.setattr(orch, 'load_typedb_config', lambda: TypeDBConfig(address='localhost:1729', database='cloud_delivery'))
+    monkeypatch.setattr(orch, '_resolve_anchor_resolution_payload', lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        orch,
+        'resolve_question_route',
+        lambda *args, **kwargs: QuestionRouteResolution(
+            status='ok',
+            error_type='',
+            error_message='',
+            route=QuestionRoute(
+                intent='relation_query',
+                anchor_entity='Room',
+                anchor_locator=AnchorLocator(match_type='key_attribute', attribute='room_id', value='Room'),
+                target_attributes=[],
+                reasoning_scope='expand_graph',
+                confidence=0.9,
+                why='test route',
+            ),
+        ),
+    )
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'Room WorkAssignment relation'})
+
+    assert response.status_code == 200
+    assert FakeTypeDBClient.connect_calls == 1
+    assert FakeTypeDBClient.close_calls == 1
+    assert FakeTypeDBClient.execute_calls >= 2
+
+
 def test_instance_qa_stream_emits_new_event_order(tmp_path: Path):
     input_file = tmp_path / 'ontology.md'
     _write_ontology(input_file)
@@ -407,13 +482,13 @@ def test_instance_qa_stream_passes_anchor_resolution_payload_into_router(tmp_pat
 ## Object Types
 
 ### `PoD`
-PoD
-Attributes:
-- `pod_id`: PoD ID
-- `pod_status`: PoD status
+中文释义：PoD
+关键属性:
+- `pod_id`：PoD ID
+- `pod_status`：PoD status
 
 ## Link Types
-- `PoD HAS PoD`: PoD self relation
+- `PoD HAS PoD`：PoD self relation
 """,
         encoding='utf-8',
     )
@@ -760,6 +835,88 @@ Attributes:
     response = client.get('/api/qa/stream', params={'q': 'pod-001?pod-002??????'})
 
     assert response.status_code == 200
+
+
+
+
+def test_instance_qa_stream_uses_prebuilt_anchor_index_without_full_entity_scan(tmp_path: Path, monkeypatch):
+    input_file = tmp_path / 'ontology.md'
+    input_file.write_text(
+        """# Test Ontology
+
+## Object Types
+
+### `PoD`
+\u4e2d\u6587\u91ca\u4e49\uff1aPoD
+\u5173\u952e\u5c5e\u6027:
+- `pod_id`\uff1aPoD ID
+- `pod_status`\uff1aPoD status
+
+## Link Types
+- `PoD HAS PoD`\uff1aPoD self relation
+""",
+        encoding='utf-8',
+    )
+
+    from cloud_delivery_ontology_palantir.instance_qa.anchor_search_index import build_anchor_search_index
+    import cloud_delivery_ontology_palantir.instance_qa.orchestrator as orch
+    from cloud_delivery_ontology_palantir.instance_qa.question_router import AnchorLocator, QuestionRoute
+
+    anchor_index_dir = tmp_path / 'anchor-index'
+    monkeypatch.setenv('INSTANCE_QA_ANCHOR_INDEX_DIR', str(anchor_index_dir))
+    monkeypatch.delenv('TYPEDB_ADDRESS', raising=False)
+    monkeypatch.delenv('TYPEDB_DATABASE', raising=False)
+    monkeypatch.delenv('TYPEDB_USERNAME', raising=False)
+    monkeypatch.delenv('TYPEDB_PASSWORD', raising=False)
+    build_anchor_search_index(
+        [
+            {
+                'entity': 'PoD',
+                'attribute': 'pod_id',
+                'raw_value': 'POD-001',
+                'iid': 'iid-1',
+                'payload': {'_entity': 'PoD', '_iid': 'iid-1', 'pod_id': 'POD-001'},
+            }
+        ],
+        db_path=anchor_index_dir / 'anchor_index_default.sqlite3',
+    )
+
+    def fail_full_scan(locator_registry):
+        raise AssertionError('should not full-scan entity rows when prebuilt anchor index exists')
+
+    def fake_resolve_question_route(*args, **kwargs):
+        payload = kwargs['anchor_resolution_payload']
+        assert payload['selected']['entity'] == 'PoD'
+        assert payload['selected']['value'] == 'POD-001'
+        return QuestionRoute(
+            intent='attribute_lookup',
+            anchor_entity='PoD',
+            anchor_locator=AnchorLocator(match_type='key_attribute', attribute='pod_id', value='POD-001'),
+            target_attributes=['pod_status'],
+            reasoning_scope='anchor_only',
+            confidence=0.98,
+            why='prebuilt index selected POD-001',
+        )
+
+    def fake_run_typeql_readonly(typeql: str):
+        if '$root isa pod;' in typeql and '$root has pod-id "POD-001";' in typeql:
+            return ([{'_entity': 'PoD', '_iid': 'iid-1', 'pod_id': 'POD-001', 'pod_status': 'Installing'}], None)
+        return ([], None)
+
+    monkeypatch.setattr(orch, '_load_anchor_candidate_rows', fail_full_scan)
+    monkeypatch.setattr(orch, 'resolve_question_route', fake_resolve_question_route)
+    monkeypatch.setattr(orch, 'validate_question_route', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, 'validate_question_dsl', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, 'validate_fact_query_dsl', lambda *args, **kwargs: None)
+    monkeypatch.setattr(orch, '_run_typeql_readonly', fake_run_typeql_readonly)
+
+    app = create_app(input_file=input_file)
+    client = TestClient(app)
+    response = client.get('/api/qa/stream', params={'q': 'POD-001???????'})
+
+    assert response.status_code == 200
+    question_payload = _event_payloads(response.text, 'question_dsl')[0]
+    assert question_payload['question_dsl']['anchor']['identifier'] == {'attribute': 'pod_id', 'value': 'POD-001'}
 
 
 def test_instance_qa_stream_router_failure_does_not_fallback_to_project(tmp_path: Path, monkeypatch):

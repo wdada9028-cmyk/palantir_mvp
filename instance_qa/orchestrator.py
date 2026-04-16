@@ -1,9 +1,14 @@
 ﻿from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
+from contextlib import nullcontext
+
 from collections import defaultdict
 from dataclasses import dataclass
 
+from .anchor_search_index import build_anchor_search_index, search_anchor_candidates
 from ..models.ontology import OntologyGraph
 from ..qa.template_answering import TemplateAnswer, build_instance_template_answer
 from ..search.ontology_query_engine import retrieve_ontology_evidence
@@ -70,10 +75,44 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
     schema_registry = build_schema_registry(graph)
     parsed = parse_query(question)
     router_schema_markdown = _load_router_schema_markdown(graph)
+    typedb_config = load_typedb_config()
+
+    if typedb_config is None:
+        return _run_instance_qa_with_client(
+            question,
+            graph,
+            schema_registry,
+            parsed.normalized_query,
+            router_schema_markdown,
+            typedb_client=None,
+        )
+
+    with TypeDBClient(typedb_config) as typedb_client:
+        return _run_instance_qa_with_client(
+            question,
+            graph,
+            schema_registry,
+            parsed.normalized_query,
+            router_schema_markdown,
+            typedb_client=typedb_client,
+        )
+
+
+
+def _run_instance_qa_with_client(
+    question: str,
+    graph: OntologyGraph,
+    schema_registry: SchemaRegistry,
+    normalized_query: str,
+    router_schema_markdown: str,
+    *,
+    typedb_client: TypeDBClient | None,
+) -> InstanceQAResult:
     anchor_resolution_payload = _resolve_anchor_resolution_payload(
         question,
         schema_registry,
         schema_markdown=router_schema_markdown,
+        typedb_client=typedb_client,
     )
     route_resolution = _normalize_question_route_resolution(
         resolve_question_route(
@@ -94,14 +133,14 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
     if router_failed:
         question_dsl = _build_router_failed_question_dsl(
             question,
-            parsed.normalized_query,
+            normalized_query,
             schema_registry,
             anchor_resolution_payload=anchor_resolution_payload,
         )
     else:
         question_dsl = _build_question_dsl(
             question,
-            parsed.normalized_query,
+            normalized_query,
             schema_registry,
             route=route_resolution.route,
         )
@@ -121,7 +160,7 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
 
     if (not router_failed) and question_validation_error is None:
         initial_queries = build_fact_queries(question_dsl, schema_registry)
-        initial_rows = _execute_fact_queries(initial_queries, schema_registry, fact_query_records)
+        initial_rows = _execute_fact_queries(initial_queries, schema_registry, fact_query_records, typedb_client)
         all_rows.extend(initial_rows)
 
         current_seed_identifiers = _collect_seed_identifiers(initial_rows, schema_registry)
@@ -143,7 +182,7 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
             if not propagation_queries:
                 break
 
-            propagation_rows = _execute_fact_queries(propagation_queries, schema_registry, fact_query_records)
+            propagation_rows = _execute_fact_queries(propagation_queries, schema_registry, fact_query_records, typedb_client)
             if not propagation_rows:
                 break
 
@@ -174,7 +213,7 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
         registry=schema_registry,
         understanding=_build_evidence_understanding(
             question_dsl,
-            parsed.normalized_query,
+            normalized_query,
             router_diagnostics=router_diagnostics,
             blocked_before_retrieval=router_failed,
         ),
@@ -207,7 +246,7 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
 
     return InstanceQAResult(
         question=question,
-        normalized_query=parsed.normalized_query,
+        normalized_query=normalized_query,
         question_dsl=question_dsl,
         question_validation_error=question_validation_error,
         fact_queries=fact_query_records,
@@ -223,10 +262,12 @@ def run_instance_qa(question: str, graph: OntologyGraph) -> InstanceQAResult:
     )
 
 
+
 def _execute_fact_queries(
     queries,
     schema_registry: SchemaRegistry,
     fact_query_records: list[dict[str, object]],
+    typedb_client: TypeDBClient | None,
 ) -> list[dict[str, object]]:
     collected_rows: list[dict[str, object]] = []
     for query in queries:
@@ -236,7 +277,7 @@ def _execute_fact_queries(
             continue
 
         typeql = build_typeql_query(query)
-        rows, query_error = _run_typeql_readonly(typeql)
+        rows, query_error = _call_readonly_query(typeql, typedb_client)
         if rows:
             collected_rows.extend(rows)
         fact_query_records.append(
@@ -349,6 +390,7 @@ def _resolve_anchor_resolution_payload(
     schema_registry: SchemaRegistry,
     *,
     schema_markdown: str = '',
+    typedb_client: TypeDBClient | None = None,
 ) -> dict[str, object] | None:
     locator_registry = build_anchor_locator_registry(schema_registry)
     if not locator_registry:
@@ -358,53 +400,69 @@ def _resolve_anchor_resolution_payload(
     if not surface_candidates:
         return None
 
-    candidate_rows_by_entity = _load_anchor_candidate_rows(locator_registry)
-    if not any(candidate_rows_by_entity.values()):
+    index_path = _build_or_load_anchor_search_index(locator_registry, typedb_client=typedb_client)
+    if index_path is None:
         return None
 
     fallback_payload: dict[str, object] | None = None
-    for raw_anchor_text in surface_candidates:
-        deterministic_result = resolve_anchor_candidates(
-            raw_anchor_text=raw_anchor_text,
-            locator_registry=locator_registry,
-            candidate_rows_by_entity=candidate_rows_by_entity,
-        )
-        if not deterministic_result.candidates:
-            continue
+    attempted_refresh = False
+    while True:
+        had_any_hit = False
+        for raw_anchor_text in surface_candidates:
+            search_hits = search_anchor_candidates(index_path, raw_anchor_text, top_k=20)
+            candidate_rows_by_entity = _group_anchor_search_hits(search_hits)
+            if not any(candidate_rows_by_entity.values()):
+                continue
 
-        candidate_context = build_anchor_candidate_context(
-            question=question,
-            schema_registry=schema_registry,
-            resolution=deterministic_result,
-        )
+            had_any_hit = True
+            deterministic_result = resolve_anchor_candidates(
+                raw_anchor_text=raw_anchor_text,
+                locator_registry=locator_registry,
+                candidate_rows_by_entity=candidate_rows_by_entity,
+            )
+            if not deterministic_result.candidates:
+                continue
 
-        rank_decision = None
-        if not (
-            deterministic_result.selected is not None
-            and deterministic_result.match_stage in {'exact', 'light'}
-        ):
-            rank_decision = resolve_anchor_candidate_rank(
+            candidate_context = build_anchor_candidate_context(
                 question=question,
-                schema_markdown=schema_markdown,
-                candidate_context=candidate_context,
+                schema_registry=schema_registry,
+                resolution=deterministic_result,
             )
 
-        payload = apply_anchor_resolution_policy(
-            deterministic_result=deterministic_result,
-            candidate_context=candidate_context,
-            rank_decision=rank_decision,
-        )
-        if payload is None:
-            continue
+            rank_decision = None
+            if not (
+                deterministic_result.selected is not None
+                and deterministic_result.match_stage in {'exact', 'light'}
+            ):
+                rank_decision = resolve_anchor_candidate_rank(
+                    question=question,
+                    schema_markdown=schema_markdown,
+                    candidate_context=candidate_context,
+                )
 
-        selection = payload.get('selection') if isinstance(payload, dict) else None
-        decision = str(selection.get('decision') or '').strip() if isinstance(selection, dict) else ''
-        if decision == 'select':
-            return payload
-        if fallback_payload is None:
-            fallback_payload = payload
+            payload = apply_anchor_resolution_policy(
+                deterministic_result=deterministic_result,
+                candidate_context=candidate_context,
+                rank_decision=rank_decision,
+            )
+            if payload is None:
+                continue
 
-    return fallback_payload
+            selection = payload.get('selection') if isinstance(payload, dict) else None
+            decision = str(selection.get('decision') or '').strip() if isinstance(selection, dict) else ''
+            if decision == 'select':
+                return payload
+            if fallback_payload is None:
+                fallback_payload = payload
+
+        if had_any_hit or attempted_refresh:
+            return fallback_payload
+
+        refreshed_index_path = _build_or_load_anchor_search_index(locator_registry, typedb_client=typedb_client, force_rebuild=True)
+        if refreshed_index_path is None or refreshed_index_path == index_path and attempted_refresh:
+            return fallback_payload
+        index_path = refreshed_index_path
+        attempted_refresh = True
 
 
 
@@ -534,13 +592,136 @@ def _extract_anchor_surface_candidates(question: str) -> list[str]:
     return values
 
 
-def _load_anchor_candidate_rows(locator_registry: dict[str, object]) -> dict[str, list[dict[str, object]]]:
+def _build_or_load_anchor_search_index(
+    locator_registry: dict[str, object],
+    *,
+    typedb_client: TypeDBClient | None,
+    force_rebuild: bool = False,
+) -> Path | None:
+    config = load_typedb_config()
+    db_path = _anchor_index_db_path(config)
+    allow_cached_index = config is not None or bool(os.getenv('INSTANCE_QA_ANCHOR_INDEX_DIR'))
+    if (not force_rebuild) and allow_cached_index and db_path.exists() and db_path.stat().st_size > 0:
+        return db_path
+
+    candidate_rows_by_entity = _call_load_anchor_candidate_rows(locator_registry, typedb_client)
+    index_rows: list[dict[str, object]] = []
+    for entity_name, rows in candidate_rows_by_entity.items():
+        locator = locator_registry.get(entity_name)
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            lookup_attributes = _resolve_lookup_attributes_for_anchor_index(locator, row)
+            if not lookup_attributes:
+                continue
+            payload = dict(row)
+            for attribute in lookup_attributes:
+                raw_value = str(row.get(attribute) or '').strip()
+                if not raw_value:
+                    continue
+                iid = _resolve_anchor_index_iid(row, entity_name, attribute, raw_value)
+                index_rows.append(
+                    {
+                        'entity': entity_name,
+                        'attribute': attribute,
+                        'raw_value': raw_value,
+                        'iid': iid,
+                        'payload': payload,
+                    }
+                )
+    if not index_rows:
+        return None
+    return build_anchor_search_index(index_rows, db_path=db_path)
+
+
+
+def _resolve_lookup_attributes_for_anchor_index(locator: object, row: dict[str, object]) -> tuple[str, ...]:
+    lookup_attributes = tuple(getattr(locator, 'lookup_attributes', ()) or ())
+    if lookup_attributes:
+        return lookup_attributes
+
+    fallback_attributes: list[str] = []
+    for key, value in row.items():
+        if key.startswith('_'):
+            continue
+        if value is None:
+            continue
+        text = str(value).strip()
+        if not text:
+            continue
+        if key in _IDENTIFIER_FALLBACK_KEYS or key.endswith(('_id', '_code', '_name', '_model')):
+            fallback_attributes.append(key)
+    return tuple(fallback_attributes)
+
+
+
+def _resolve_anchor_index_iid(row: dict[str, object], entity_name: str, attribute: str, raw_value: str) -> str:
+    iid = str(row.get('_iid') or '').strip()
+    if iid:
+        return iid
+
+    preferred = str(row.get(attribute) or '').strip()
+    if preferred:
+        return f'{entity_name}:{attribute}:{preferred}'
+    return f'{entity_name}:{attribute}:{raw_value}'
+
+
+
+def _anchor_index_db_path(config) -> Path:
+    root = Path(os.getenv('INSTANCE_QA_ANCHOR_INDEX_DIR', '.cache/instance_qa'))
+    root.mkdir(parents=True, exist_ok=True)
+    database = str(getattr(config, 'database', '') or 'default').strip().replace('/', '_').replace('\\', '_')
+    return root / f'anchor_index_{database}.sqlite3'
+
+
+
+def _group_anchor_search_hits(search_hits: list[dict[str, object]]) -> dict[str, list[dict[str, object]]]:
+    result: dict[str, list[dict[str, object]]] = defaultdict(list)
+    seen: set[tuple[str, str]] = set()
+    for hit in search_hits:
+        if not isinstance(hit, dict):
+            continue
+        entity = str(hit.get('entity') or '').strip()
+        iid = str(hit.get('iid') or '').strip()
+        payload = hit.get('payload')
+        if not entity or not iid or not isinstance(payload, dict):
+            continue
+        key = (entity, iid)
+        if key in seen:
+            continue
+        seen.add(key)
+        row = dict(payload)
+        row.setdefault('_entity', entity)
+        row.setdefault('_iid', iid)
+        result[entity].append(row)
+    return result
+
+
+
+def _load_anchor_candidate_rows(locator_registry: dict[str, object], *, typedb_client: TypeDBClient | None) -> dict[str, list[dict[str, object]]]:
     result: dict[str, list[dict[str, object]]] = {}
     for entity_name in locator_registry:
         typeql = _build_anchor_candidate_query(entity_name)
-        rows, _ = _run_typeql_readonly(typeql)
+        rows, _ = _call_readonly_query(typeql, typedb_client)
         result[entity_name] = rows
     return result
+
+
+
+def _call_load_anchor_candidate_rows(locator_registry: dict[str, object], typedb_client: TypeDBClient | None) -> dict[str, list[dict[str, object]]]:
+    try:
+        return _load_anchor_candidate_rows(locator_registry, typedb_client=typedb_client)
+    except TypeError:
+        return _load_anchor_candidate_rows(locator_registry)
+
+
+
+def _call_readonly_query(typeql: str, typedb_client: TypeDBClient | None) -> tuple[list[dict[str, object]], str | None]:
+    try:
+        return _run_typeql_readonly(typeql, typedb_client)
+    except TypeError:
+        return _run_typeql_readonly(typeql)
+
 
 
 def _build_anchor_candidate_query(entity_name: str) -> str:
@@ -554,7 +735,14 @@ def _build_anchor_candidate_query(entity_name: str) -> str:
     )
 
 
-def _run_typeql_readonly(typeql: str) -> tuple[list[dict[str, object]], str | None]:
+def _run_typeql_readonly(typeql: str, typedb_client: TypeDBClient | None = None) -> tuple[list[dict[str, object]], str | None]:
+    if typedb_client is not None:
+        try:
+            rows = typedb_client.execute_readonly(typeql)
+            return rows, None
+        except (TypeDBConnectionError, TypeDBQueryError) as exc:
+            return [], f'{type(exc).__name__}: {exc}'
+
     config = load_typedb_config()
     if config is None:
         return [], 'typedb_not_configured'

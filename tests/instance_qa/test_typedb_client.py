@@ -281,3 +281,15 @@ def test_execute_readonly_requires_connection():
         client.execute_readonly("""match
 $root isa room;
 get $root;""")
+
+
+def test_typedb_client_context_manager_connects_and_closes(monkeypatch):
+    query_manager = _FakeQueryManager(docs=[])
+    fake_driver = _install_fake_typedb(monkeypatch, query_manager=query_manager)
+    client = TypeDBClient(TypeDBConfig(address='localhost:1729', database='cloud_delivery', username='admin', password='password'))
+
+    with client as connected:
+        assert connected is client
+        assert client._driver is not None
+
+    assert fake_driver.closed is True
