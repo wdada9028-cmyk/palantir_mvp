@@ -1262,7 +1262,7 @@ window.cytoscape = window.cytoscape || cytoscape;
           : null;
         setQaTraceSummary(currentTraceSummary);
         if (!handleRouterFailureDiagnostics(safePayload.router_diagnostics, safePayload.blocked_before_retrieval)) {
-          setQaStatus('\u5df2\u751f\u6210\u56de\u7b54\u6458\u8981');
+          setQaStatus('\u6b63\u5728\u751f\u6210\u56de\u7b54\u6458\u8981');
         }
         return;
       }
@@ -1476,6 +1476,7 @@ window.cytoscape = window.cytoscape || cytoscape;
             currentTraceSummary = payload.trace_summary;
             setQaTraceSummary(payload.trace_summary);
           }
+          setQaStatus('\u5df2\u751f\u6210\u56de\u7b54\u6458\u8981');
         }
       }
     }

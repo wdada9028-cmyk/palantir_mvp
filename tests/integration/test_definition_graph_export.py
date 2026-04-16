@@ -366,6 +366,17 @@ def test_exported_html_contains_streaming_answer_and_trace_sections(tmp_path: Pa
     assert 'qa-focus-playback' in text
 
 
+def test_exported_html_uses_generating_then_generated_answer_status_copy(tmp_path: Path):
+    graph = OntologyGraph(metadata={'title': 'Ontology'})
+    output = export_interactive_graph_html(graph, tmp_path / 'ontology.html', title='Ontology Graph')
+    text = output.read_text(encoding='utf-8')
+
+    assert "setQaStatus('\u6b63\u5728\u751f\u6210\u56de\u7b54\u6458\u8981')" in text
+    assert "setQaStatus('\u5df2\u751f\u6210\u56de\u7b54\u6458\u8981')" in text
+
+
+
+
 
 def test_exported_html_prefers_structured_summary_sections_over_debug_log_text(tmp_path: Path):
     graph = OntologyGraph(metadata={'title': 'Ontology'})
