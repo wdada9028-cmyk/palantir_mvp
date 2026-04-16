@@ -1,4 +1,4 @@
-from cloud_delivery_ontology_palantir.qa.template_answering import build_template_answer, _build_search_trace_report, _dedupe_trace_steps
+from cloud_delivery_ontology_palantir.qa.template_answering import build_instance_template_answer, build_template_answer, _build_search_trace_report, _dedupe_trace_steps
 from cloud_delivery_ontology_palantir.search.ontology_query_models import (
     EvidenceItem,
     OntologyEvidenceBundle,
@@ -159,3 +159,126 @@ def test_build_template_answer_keeps_insufficient_evidence_summary_user_facing()
     assert '\u8bbe\u5907\u843d\u4f4d\u70b9(PoD)' not in answer.answer
     assert '\u8bbe\u5907\u843d\u4f4d\u70b9' in answer.answer
     assert '[E1]' not in answer.answer
+
+
+
+def test_build_instance_template_answer_summarizes_impact_with_concrete_instances_instead_of_counts():
+    fact_pack = {
+        'instances': {
+            'Room': [{'room_id': 'L1-A', 'room_status': 'ready'}],
+            'PoD': [
+                {'pod_id': 'POD-001', 'pod_status': 'Installing'},
+                {'pod_id': 'POD-002', 'pod_status': 'ArrivedWaitingInstall'},
+            ],
+            'ActivityInstance': [
+                {'activity_id': 'ACT-002', 'activity_status': 'in-progress'},
+            ],
+            'RoomMilestone': [
+                {'milestone_id': 'RM-1', 'milestone_status': 'active', 'due_time': '2026-01-08T18:00:00'},
+            ],
+        },
+        'links': [
+            {'source_entity': 'PoD', 'source_id': 'POD-001', 'relation': 'POD_ACTIVITY', 'target_entity': 'ActivityInstance', 'target_id': 'ACT-002'},
+            {'source_entity': 'RoomMilestone', 'source_id': 'RM-1', 'relation': 'ROOM_MILESTONE_CONSTRAINT', 'target_entity': 'Room', 'target_id': 'L1-A'},
+        ],
+        'metadata': {
+            'anchor': {'entity': 'Room', 'id': 'L1-A'},
+        },
+    }
+    reasoning_result = {
+        'summary': {'answer_type': 'impact_list'},
+        'impact_summary': {
+            'direct_counts': {'RoomMilestone': 1, 'PoD': 2, 'ActivityInstance': 1},
+            'propagated_counts': {},
+        },
+    }
+
+    answer = build_instance_template_answer('L1-A\u673a\u623f\u65ad\u7535\u4e00\u5468\uff0c\u4f1a\u6709\u54ea\u4e9b\u5f71\u54cd\uff1f', fact_pack, reasoning_result)
+
+    assert 'POD-001' in answer.answer
+    assert 'POD-002' in answer.answer
+    assert 'ACT-002' in answer.answer
+    assert 'RM-1' in answer.answer
+    assert 'Installing' in answer.answer
+    assert 'ArrivedWaitingInstall' in answer.answer
+    assert '2026-01-08T18:00:00' in answer.answer
+    assert '\u76f4\u63a5\u5f71\u54cd\uff1a' not in answer.answer
+    assert ' 1 ?' not in answer.answer
+    assert '?' not in answer.answer
+
+
+def test_build_instance_template_answer_summarizes_relation_query_with_concrete_related_instances():
+    fact_pack = {
+        'instances': {
+            'PoD': [{'pod_id': 'POD-001', 'pod_status': 'Installing'}],
+            'WorkAssignment': [{'assignment_id': 'WA-001'}],
+            'ActivityInstance': [{'activity_id': 'ACT-001'}, {'activity_id': 'ACT-002'}],
+            'Project': [{'project_id': 'P-MEITUAN'}],
+        },
+        'links': [
+            {'source_entity': 'WorkAssignment', 'source_id': 'WA-001', 'relation': 'WORK_ASSIGNMENT_POD', 'target_entity': 'PoD', 'target_id': 'POD-001'},
+            {'source_entity': 'PoD', 'source_id': 'POD-001', 'relation': 'POD_ACTIVITY', 'target_entity': 'ActivityInstance', 'target_id': 'ACT-001'},
+            {'source_entity': 'PoD', 'source_id': 'POD-001', 'relation': 'POD_ACTIVITY', 'target_entity': 'ActivityInstance', 'target_id': 'ACT-002'},
+            {'source_entity': 'Project', 'source_id': 'P-MEITUAN', 'relation': 'PROJECT_POD', 'target_entity': 'PoD', 'target_id': 'POD-001'},
+        ],
+        'metadata': {
+            'anchor': {'entity': 'PoD', 'id': 'POD-001'},
+        },
+    }
+
+    answer = build_instance_template_answer('POD-001\u4e0e\u54ea\u4e9b\u5b9e\u4f53\u5b9e\u4f8b\u6709\u5173\u7cfb\uff1f', fact_pack, {})
+
+    assert 'WA-001' in answer.answer
+    assert 'ACT-001' in answer.answer
+    assert 'ACT-002' in answer.answer
+    assert 'P-MEITUAN' in answer.answer
+    assert '\u76f4\u63a5\u5f71\u54cd\uff1a' not in answer.answer
+    assert ' 1 ?' not in answer.answer
+
+
+def test_build_instance_template_answer_returns_clean_attribute_lookup_summary():
+    fact_pack = {
+        'instances': {
+            'PoD': [
+                {
+                    'pod_id': 'POD-001',
+                    'pod_status': 'Installing',
+                }
+            ]
+        },
+        'metadata': {
+            'anchor': {
+                'entity': 'PoD',
+                'id': 'POD-001',
+                'identifier': {'attribute': 'pod_id', 'value': 'POD-001'},
+            },
+            'target_attributes': ['pod_status'],
+        },
+    }
+
+    answer = build_instance_template_answer('POD-001\u7684\u72b6\u6001\u662f\u4ec0\u4e48\uff1f', fact_pack, {})
+
+    assert answer.answer == 'POD-001 \u5f53\u524d\u72b6\u6001\u4e3a Installing\u3002'
+    assert '*' not in answer.answer
+    assert '?' not in answer.answer
+
+
+def test_build_instance_template_answer_returns_router_failure_message_instead_of_empty_project_hint():
+    fact_pack = {
+        'instances': {},
+        'metadata': {
+            'router_diagnostics': {
+                'status': 'failed',
+                'error_type': 'router_timeout',
+                'error_message': 'timeout',
+            },
+            'blocked_before_retrieval': True,
+            'anchor': {'entity': 'Project', 'id': 'POD-001'},
+        },
+    }
+
+    answer = build_instance_template_answer('POD-001???????', fact_pack, {})
+
+    assert '\u9519\u8bef\u7c7b\u578b\uff1arouter_timeout' in answer.answer
+    assert '\u6ca1\u6709\u7ee7\u7eed\u6267\u884c\u5b9e\u4f8b\u68c0\u7d22' in answer.answer
+    assert 'Project \u5f53\u524d\u672a\u547d\u4e2d\u5b9e\u4f8b\u6570\u636e' not in answer.answer

@@ -1,9 +1,18 @@
 import asyncio
 from types import SimpleNamespace
+import sys
 from unittest.mock import AsyncMock
 
-from cloud_delivery_ontology_palantir.qa.generator import GeneratorChunk, GeneratorResult, _build_fact_lines, _build_messages, iter_generated_answer
+from cloud_delivery_ontology_palantir.qa.generator import GeneratorChunk, GeneratorResult, _build_fact_lines, _build_messages, _build_instance_messages, _load_config, get_openai_client, iter_generated_answer, iter_generated_instance_answer
 from cloud_delivery_ontology_palantir.qa.template_answering import TemplateAnswer
+
+from cloud_delivery_ontology_palantir.instance_qa.evidence_models import (
+    EvidenceBundle,
+    EntityEvidenceGroup,
+    InstanceEvidence,
+    SchemaContext,
+)
+from cloud_delivery_ontology_palantir.instance_qa.llm_answer_context_builder import build_llm_answer_context
 from cloud_delivery_ontology_palantir.search.ontology_query_models import (
     EvidenceItem,
     OntologyEvidenceBundle,
@@ -89,6 +98,48 @@ async def _collect(question: str, bundle: OntologyEvidenceBundle, fallback: Temp
     return items
 
 
+
+
+def test_load_config_ignores_answer_specific_base_key_and_uses_shared_base_key_with_answer_model(monkeypatch):
+    monkeypatch.setenv('QWEN_API_BASE', 'https://shared.example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'shared-key')
+    monkeypatch.setenv('QWEN_MODEL', 'shared-model')
+    monkeypatch.setenv('QWEN_ANSWER_API_BASE', 'https://answer.example.com/v1')
+    monkeypatch.setenv('QWEN_ANSWER_API_KEY', 'answer-key')
+    monkeypatch.setenv('QWEN_ANSWER_MODEL', 'answer-model')
+
+    config = _load_config()
+
+    assert config is not None
+    assert config.api_base == 'https://shared.example.com/v1'
+    assert config.api_key == 'shared-key'
+    assert config.model == 'answer-model'
+
+
+def test_get_openai_client_ignores_answer_specific_base_key_and_uses_shared_base_key(monkeypatch):
+    monkeypatch.setenv('QWEN_API_BASE', 'https://shared.example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'shared-key')
+    monkeypatch.setenv('QWEN_MODEL', 'shared-model')
+    monkeypatch.setenv('QWEN_ANSWER_API_BASE', 'https://answer.example.com/v1')
+    monkeypatch.setenv('QWEN_ANSWER_API_KEY', 'answer-key')
+    monkeypatch.setenv('QWEN_ANSWER_MODEL', 'answer-model')
+
+    captured = {}
+
+    class FakeAsyncOpenAI:
+        def __init__(self, *, api_key, base_url):
+            captured['api_key'] = api_key
+            captured['base_url'] = base_url
+
+    monkeypatch.setitem(sys.modules, 'openai', SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI))
+
+    get_openai_client()
+
+    assert captured == {
+        'api_key': 'shared-key',
+        'base_url': 'https://shared.example.com/v1',
+    }
+
 def test_build_fact_lines_use_chinese_only_summary_labels():
     bundle = _build_bundle(with_relation=True)
 
@@ -146,6 +197,8 @@ def test_iter_generated_answer_falls_back_when_qwen_config_missing(monkeypatch):
 
     monkeypatch.delenv('QWEN_API_BASE', raising=False)
     monkeypatch.delenv('QWEN_API_KEY', raising=False)
+    monkeypatch.delenv('QWEN_ANSWER_API_BASE', raising=False)
+    monkeypatch.delenv('QWEN_ANSWER_API_KEY', raising=False)
 
     chunks = asyncio.run(_collect('\u54ea\u4e9b\u91cc\u7a0b\u7891\u4f1a\u5f71\u54cd\u843d\u4f4d\uff1f', bundle, fallback))
 
@@ -200,3 +253,86 @@ def test_iter_generated_answer_falls_back_after_mid_stream_exception(monkeypatch
     assert isinstance(chunks[0], GeneratorChunk)
     assert chunks[0].delta == '\u7ed3\u8bba\uff1a'
     assert chunks[-1] == GeneratorResult(answer_text='deterministic fallback', used_fallback=True)
+
+
+def _build_evidence_context():
+    bundle = EvidenceBundle(
+        question='L1-A??????????????',
+        understanding={'anchor': {'entity': 'Room', 'id': 'L1-A'}},
+        positive_evidence=[
+            EntityEvidenceGroup(
+                entity='PoDPosition',
+                instances=[
+                    InstanceEvidence(
+                        entity='PoDPosition',
+                        iid='0xpos1',
+                        business_keys={'position_id': 'POS-001'},
+                        attributes={'position_id': 'POS-001', 'position_status': 'ready'},
+                        schema_context=SchemaContext(
+                            entity_name='PoDPosition',
+                            entity_zh='PoD??',
+                            key_attributes=['position_id'],
+                            relevant_relations=['ROOM_POSITION'],
+                        ),
+                        paths=['Room(L1-A) --ROOM_POSITION--> PoDPosition(POS-001)'],
+                    )
+                ],
+            )
+        ],
+        edges=[],
+        paths=['Room(L1-A) --ROOM_POSITION--> PoDPosition(POS-001)'],
+        empty_entities=[],
+        unrelated_entities=[],
+        omitted_entities=[],
+    )
+    return build_llm_answer_context(bundle)
+
+
+def test_build_instance_messages_uses_evidence_bundle_payload():
+    messages = _build_instance_messages(question='?????', llm_context=_build_evidence_context())
+
+    assert messages[0]['role'] == 'system'
+    assert 'empty_entities' in messages[1]['content']
+    assert 'attributes' in messages[1]['content']
+
+
+async def _collect_instance(question: str, llm_context, fallback: TemplateAnswer):
+    items = []
+    async for item in iter_generated_instance_answer(
+        question,
+        schema_summary={},
+        fact_pack={},
+        reasoning_result={},
+        llm_answer_context=llm_context,
+        fallback_answer=fallback,
+    ):
+        items.append(item)
+    return items
+
+
+def test_iter_generated_instance_answer_falls_back_when_context_missing(monkeypatch):
+    fallback = TemplateAnswer(answer='deterministic fallback', insufficient_evidence=False)
+
+    monkeypatch.setenv('QWEN_API_BASE', 'https://example.com/v1')
+    monkeypatch.setenv('QWEN_API_KEY', 'test-key')
+
+    chunks = asyncio.run(_collect_instance('?????', None, fallback))
+
+    assert chunks == [GeneratorResult(answer_text='deterministic fallback', used_fallback=True)]
+
+
+def test_build_instance_messages_preserves_router_failure_diagnostics_from_llm_context():
+    context = _build_evidence_context()
+    context.user_payload['understanding']['router_diagnostics'] = {
+        'status': 'failed',
+        'error_type': 'router_invalid_json',
+        'error_message': 'bad json',
+    }
+    context.user_payload['understanding']['blocked_before_retrieval'] = True
+    context.user_payload['router_diagnostics'] = context.user_payload['understanding']['router_diagnostics']
+    context.user_payload['blocked_before_retrieval'] = True
+
+    messages = _build_instance_messages('POD-001???????', context)
+
+    assert 'router_invalid_json' in messages[1]['content']
+    assert '\u672a\u8fdb\u5165\u6b63\u5e38\u5b9e\u4f8b\u68c0\u7d22\u94fe\u8def' in messages[1]['content']

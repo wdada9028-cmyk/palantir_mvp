@@ -1,16 +1,278 @@
-# Session Log
+﻿# Session Log
 
 ## Current State
 - Agent: Codex
-- Branch: codex/main2
-- Last session: 2026-03-24 21:01
-- Active work: familiarized current project structure and verified baseline health
+- Branch: codex/llm-question-router
+- Last session: 2026-04-14 17:33
+- Active work: completed router failure explicit-error handling end-to-end (SSE + frontend), fixed playback resume behavior, and cleaned related integration regressions
 - Blockers: None
 - Next steps:
-  - Follow the user's next implementation or debugging request
-  - Use `typedb_schema_v4.tql` or `typedb_schema_v4.converted.md` for local build/serve smoke flows if needed
+  - 如需，提交当前未提交改动
+  - 如需，继续清理 router diagnostics 契约重复与测试夹具乱码
 
 ## Session History
+### 2026-04-14 17:33 - Codex
+**What was done:**
+- 修复 router failure 前端状态文案乱码，question_dsl / fact_query_planned / evidence_bundle_ready / answer_done 均改为明确中文失败态提示
+- 完成 router failure 显式错误处理的 SSE/前端收口：blocked_before_retrieval 时不再播放正常 schema trace，页面直接展示失败状态
+- 修复 instance QA 流测试中 relation_query 场景缺少成功 router monkeypatch 的问题，并补齐回归断言
+- 复跑相关回归：question router / instance QA stream / graph export / llm answer context / generator / template answering，全绿
+
+**Decisions made:**
+- router 失败时不再伪装为正常检索成功，前端直接展示失败态文案
+- 前端新增失败态文案统一使用真实中文，避免再次出现问号乱码
+
+**Open questions:**
+- 仍有 1 个既有 DeprecationWarning（测试里 \*\*([^*]+)\*\* 字面量），未处理
+### 2026-04-10 16:39 - Codex
+**What was done:**
+- Fixed instance-QA SSE trace copy so `trace_anchor`, `trace_expand`, and `evidence_final` now emit readable Chinese instead of placeholder question marks
+- Cleaned `build_instance_template_answer(...)` so attribute lookups return natural sentences like `POD-001 ????? Installing?`
+- Updated instance answer style guidance to discourage Markdown emphasis and added front-end formatting that converts accidental `**...**` inline emphasis into a styled pill instead of raw asterisks
+- Added regression tests for clean trace copy, clean attribute fallback wording, and answer-panel formatting; re-ran targeted suites plus the full suite successfully
+
+**Decisions made:**
+- Keep the router/playback behavior unchanged; only repair customer-visible wording and answer rendering
+- Handle stray Markdown emphasis defensively in the front end while also steering the LLM away from `**...**` in prompts
+
+**Open questions:**
+- Whether to do one final manual browser smoke before commit
+
+
+### 2026-04-10 15:58 - Codex
+**What was done:**
+- Changed instance QA schema playback so `anchor_only` queries build a seed-only schema bundle instead of reusing the old expanding schema retrieval path
+- Added regression coverage proving `POD-001???????` emits `trace_anchor` only and no `trace_expand` events
+- Revalidated the service behavior manually: POD status queries now highlight only `PoD`, while impact analysis still uses schema-entity expansion
+- Re-ran targeted suites and the full test suite successfully
+
+**Decisions made:**
+- Playback must follow router scope, not independently re-run broad schema retrieval for attribute lookups
+- Even for `expand_graph`, playback remains schema-entity-only; instance rows stay answer-side only
+
+**Open questions:**
+- Whether to expose the chosen router scope directly in the front-end debug panel
+
+### 2026-04-10 15:27 - Codex
+**What was done:**
+- Verified `typedb_schema_v4.converted.md` was not empty and isolated the real router failure to prompt corruption plus a 5-second router timeout
+- Rewrote instance_qa/question_router.py so the prompt is readable again, embeds full converted schema markdown, and defaults the router model to qwen3.6-plus
+- Updated instance_qa/orchestrator.py to pass resolved schema markdown into the router before falling back to legacy parsing
+- Added router timeout coverage, schema-markdown prompt coverage, and an autouse test fixture that clears QWEN env vars so tests stay hermetic
+- Re-ran targeted suites and the full test suite successfully
+
+**Decisions made:**
+- Use `typedb_schema_v4.converted.md` directly in the router prompt instead of raw TQL or a hand-written schema summary
+- Increase the router timeout to 30 seconds to avoid silent fallback into the legacy Project-based anchor path
+- Keep legacy parsing as fallback, but isolate tests from real external LLM settings by default
+
+**Open questions:**
+- Whether to add explicit router event/debug output into SSE so front-end can show the chosen route directly
+
+### 2026-04-09 14:52 - Codex
+**What was done:**
+- Added a new plan for streaming existing schema retrieval trace through the instance QA SSE path
+- Reused `retrieve_ontology_evidence(...)` inside `instance_qa/orchestrator.py` and attached the schema retrieval bundle to `InstanceQAResult`
+- Updated `server/ontology_http_service.py` to emit `trace_anchor`, `trace_expand`, and `evidence_final` before TypeDB query stages
+- Guarded the front-end so live trace events take priority over the synthetic schema playback fallback
+- Re-ran stream/export/server integration tests and the full suite
+
+**Decisions made:**
+- Do not introduce a second schema retrieval pass; reuse the existing retrieval result only
+- Keep the current front-end trace protocol and make the back-end instance QA stream conform to it
+
+**Open questions:**
+- Whether to do a quick browser smoke before commit or commit directly after tests
+
+### 2026-04-09 11:45 - Codex
+**What was done:**
+- Added a new plan for schema-only playback in the QA focus tab
+- Reworked `export/graph_export.py` so instance QA stage events only update status/summary, while graph playback is now built from schema retrieval data (`question_dsl` + `evidence_bundle`)
+- Added focused regression tests proving the focus playback no longer uses TypeDB/result/reasoning stages as graph steps
+- Re-ran export tests, server/integration tests, and the full suite
+
+**Decisions made:**
+- The ontology graph should visualize only entity/schema retrieval, not instance query or reasoning phases
+- For instance QA, playback is built after schema evidence is ready and defaults to a non-realtime replayable sequence
+
+**Open questions:**
+- Whether to do a live browser smoke before commit or commit directly after tests
+
+### 2026-04-09 11:22 - Codex
+**What was done:**
+- Added a new implementation plan file for live retrieval playback in the QA focus tab
+- Added RED tests for playback controls and auto-play hooks, then updated `export/graph_export.py`
+- Made instance QA stage snapshots auto-drive `replayFromSnapshot(...)` so the ontology graph now animates during retrieval
+- Added focus playback controls (prev / replay / next) and kept them inside the graph focus tab only
+- Re-ran export tests, server/integration tests, and the full test suite
+
+**Decisions made:**
+- Keep dynamic retrieval playback in the graph focus tab rather than polluting the answer tab
+- Reuse existing SSE snapshots and playback infrastructure instead of adding new backend events
+
+**Open questions:**
+- Whether the next step should be a manual browser smoke only, or direct commit after a quick live check
+
+### 2026-04-09 11:05 - Codex
+**What was done:**
+- Tightened the QA panel so Answer / Evidence / Focus each own a single job
+- Removed the large customer-facing trace block from the answer tab and kept only answer text, answer mode, reasoning basis, and data gaps
+- Switched the evidence tab to instance cards and kept retrieval playback under the graph focus tab
+- Updated export integration tests and re-ran export, server/integration, and full-suite verification
+
+**Decisions made:**
+- Do not duplicate the same content across answer, evidence, and focus views
+- Keep retrieval playback visible, but only from the graph focus tab
+
+**Open questions:**
+- Whether to commit the current branch diff as-is or split the already-pending unrelated changes first
+
+### 2026-04-09 09:29 - Codex
+**What was done:**
+- Added front-end QA tabs in `export/graph_export.py`: ???? / ???? / ????
+- Reworked the right panel so answer text stays in the answer tab, trace summary stays customer-readable, and key evidence / focus targets get dedicated renderers
+- Added regression coverage in `tests/integration/test_definition_graph_export.py` for tab shell, answer routing, evidence cards, focus handlers, and clean trace output
+- Re-ran focused export tests, server/integration tests, and the full suite
+
+**Decisions made:**
+- Keep the existing SSE contract and graph replay logic; only reorganize the front-end presentation layer
+- Continue hiding TypeQL / query-plan style debug content from the customer-facing panel
+
+**Open questions:**
+- None
+
+### 2026-04-08 11:17 - Codex
+**What was done:**
+- Changed config behavior so `search/intent_resolver.py` and `qa/generator.py` both use shared `QWEN_API_BASE` / `QWEN_API_KEY`
+- Kept only model split: `QWEN_INTENT_MODEL` for seed selection and `QWEN_ANSWER_MODEL` for final answer generation
+- Updated tests to prove intent/answer-specific base/key are ignored and re-ran focused plus full-suite verification
+
+**Decisions made:**
+- Base URL and API key stay single-source; only model names are split by task
+
+**Open questions:**
+- None
+
+### 2026-04-08 11:07 - Codex
+**What was done:**
+- Added dual-model env support: `search/intent_resolver.py` now prefers `QWEN_INTENT_*`, `qa/generator.py` now prefers `QWEN_ANSWER_*`, both still fallback to shared `QWEN_*`
+- Added RED/GREEN regression tests for intent-specific and answer-specific env precedence
+- Re-ran focused search/generator tests and the full suite
+
+**Decisions made:**
+- Keep backward compatibility with existing `QWEN_*` env vars while enabling separate models for intent routing and final answer generation
+
+**Open questions:**
+- Which exact answer model to pin in env for production
+
+### 2026-04-08 10:36 - Codex
+**What was done:**
+- Reworked `instance_qa/trace_summary_builder.py` to output compact/expanded customer-facing summaries with Chinese business labels, data gaps, miss explanations, and reasoning basis
+- Extended `InstanceQAResult`, wired `trace_summary_ready` in SSE, and included `trace_summary` in `answer_done`
+- Reworked `export/graph_export.py` so the QA panel renders trace summaries instead of raw query-log text while preserving playback/status hooks
+- Added/updated trace-summary coverage in instance/server/integration tests and re-ran targeted plus full-suite verification
+
+**Decisions made:**
+- Keep compact trace visible by default and put detailed sections behind a single expanded details block
+- Stop using raw TypeQL/debug text as the customer-facing trace source; keep stage events only for status/playback needs
+
+**Open questions:**
+- Whether to commit the current trace-summary/UI changes now or do one more live browser smoke with a real dataset first
+
+### %s - Codex
+**What was done:**
+- Reviewed Task 2 code quality for instance_qa/trace_summary_builder.py and tests/instance_qa/test_trace_summary_builder.py
+- Re-ran pytest tests/instance_qa/test_trace_summary_builder.py -q and confirmed 6 passed
+- Verified compact evidence selection drops useful attributes for realistic business_keys-only inputs
+- Verified compact totals ignore omitted_entities overflow and can undercount true hits
+
+**Decisions made:**
+- Review result: CHANGES_REQUESTED for Task 2 code quality
+
+**Open questions:**
+- None
+
+### 2026-04-07 21:04 - Codex
+**What was done:**
+- Reviewed Task 2 spec compliance for instance_qa/trace_summary_builder.py and tests/instance_qa/test_trace_summary_builder.py
+- Verified compact key evidence now caps item lists, preserves total counts, and limits per-instance fields
+- Ran pytest tests/instance_qa/test_trace_summary_builder.py -q and confirmed 6 passed
+
+**Decisions made:**
+- Review result: PASS for Task 2 spec compliance
+
+**Open questions:**
+- None
+
+### 2026-04-07 20:43 - Codex
+**What was done:**
+- Re-reviewed Task 1 spec compliance for instance_qa/trace_summary_builder.py and tests/instance_qa/test_trace_summary_builder.py
+- Verified updated trace summary output uses business-facing labels and compact/expanded-only sections
+- Ran pytest tests/instance_qa/test_trace_summary_builder.py -q and confirmed 2 passed
+- Printed a sample build_trace_summary(...) result to confirm the serialized output no longer exposes raw enum/debug values for the covered case
+
+**Decisions made:**
+- Review result: PASS for Task 1 spec compliance after fixes
+
+**Open questions:**
+- None
+
+### 2026-04-07 20:38 - Codex
+**What was done:**
+- Reviewed Task 1 spec compliance for instance_qa/trace_summary_builder.py and tests/instance_qa/test_trace_summary_builder.py
+- Checked plan requirements for deterministic builder, compact/expanded-only structure, business-facing fields, and TDD coverage
+- Ran pytest tests/instance_qa/test_trace_summary_builder.py -q and confirmed 1 passed
+
+**Decisions made:**
+- Review result: CHANGES_REQUESTED for Task 1 spec compliance
+
+**Open questions:**
+- None
+
+### 2026-04-07 18:44 - Codex
+**What was done:**
+- Added evidence models, evidence subgraph builder, schema-instance aligner, evidence bundle builder, prompts, and LLM answer context builder
+- Integrated the instance generator with evidence-driven prompts and wired orchestrator/service to emit `evidence_bundle_ready` and `llm_answer_context_ready`
+- Added and updated instance/server/integration/generator tests for the new evidence-driven path
+- Ran `pytest tests/instance_qa -q`, `pytest tests/server/test_ontology_http_app.py tests/integration/test_instance_qa_stream.py tests/integration/test_definition_graph_export.py -q`, and `pytest tests -q`
+
+**Decisions made:**
+- Keep backend responsibility focused on evidence collection/structuring and let the LLM do final reasoning under prompt constraints
+- Preserve full matched instance rows with attribute names and iid in evidence payloads rather than pre-filtering attributes in the backend
+- Keep the old template answer as fallback while moving the main instance-answer path to evidence-driven prompts
+
+**Open questions:**
+- Whether to commit the full evidence-driven diff now or continue with more UX/prompt refinements first
+
+### 2026-04-07 14:29 - Codex
+**What was done:**
+- Reproduced the backend `????` summary issue and rewrote `build_instance_template_answer(...)` with clean Chinese fallback text
+- Added PoDPosition propagation rules so Room event impact analysis can expand through `PoDPosition -> PoD` and `PoDPosition -> WorkAssignment`
+- Added planner/server regression coverage for the PoDPosition bridge and updated answer-summary assertions
+- Ran `pytest tests/qa/test_template_answering.py -q`, `pytest tests/instance_qa -q`, `pytest tests/server/test_ontology_http_app.py tests/integration/test_instance_qa_stream.py tests/integration/test_definition_graph_export.py -q`, and `pytest tests -q`
+
+**Decisions made:**
+- Treat the `????` output as a backend template corruption issue, not a frontend rendering issue
+- Keep propagation controlled by backend-maintained event profiles and extend the MVP with the PoDPosition bridge instead of free-form query expansion
+
+**Open questions:**
+- Whether to commit the current branch diff now or continue with more real-dataset smoke checks first
+
+### 2026-04-03 09:17 - Codex
+**What was done:**
+- Finished Task 8 integration fixes for the instance QA stream path, including orchestrator, generator fallback text, and stream tests
+- Added front-end handlers for `question_parsed` / `question_dsl` / `fact_query_planned` / `typedb_query` / `typedb_result` / `reasoning_done`
+- Added graph export regression coverage for instance QA stage handlers
+- Repaired `qa/template_answering.py` trace wording regression found by full-suite verification
+- Ran `pytest tests/instance_qa -q`, `pytest tests/server/test_ontology_http_app.py tests/integration/test_instance_qa_stream.py tests/integration/test_definition_graph_export.py -q`, and `pytest tests -q`
+
+**Decisions made:**
+- Keep the existing `/api/qa/stream` entrypoint and replace its backend with the TypeDB-backed instance QA orchestrator
+- Surface instance QA stages in the existing UI via status/evidence/trace updates instead of creating a separate panel
+- Preserve controlled backend-generated TypeQL and keep LLM limited to summarization
+
+**Open questions:**
+- Whether to split the current working tree changes into separate Task 8 / Task 9 commits now or squash them later
 
 ### 2026-03-24 21:01 - Codex
 **What was done:**
@@ -18,11 +280,11 @@
 - Inspected CLI, pipeline, parser, graph builder/exporter, server, search, QA modules, tests, and docs plans
 - Ran `python -m cloud_delivery_ontology_palantir.cli --help`
 - Ran `pytest tests -q` and got `80 passed`
-- Verified the main sample `typedb_schema_v4.tql` currently resolves to `typedb_schema_v4.converted.md` with `21` object types and `41` relations
+- Verified the main sample `typedb_schema_v4.tql` currently resolves to `ttypedb_schema_v4.converted.md` with `21` object types and `41` relations
 
 **Decisions made:**
 - Treat the repo's current center as deterministic ontology-definition graph build/serve, with optional Qwen-backed intent resolution and answer generation layered on top
-- Use `typedb_schema_v4.tql` or `typedb_schema_v4.converted.md` as the primary local sanity input pair
+- Use `typedb_schema_v4.tql` or `ttypedb_schema_v4.converted.md` as the primary local sanity input pair
 
 **Open questions:**
 - None
@@ -109,7 +371,7 @@
 - Verified the new labels also flow through Link Types business descriptions automatically where those object types are referenced
 - Re-ran `pytest tests/pipelines/test_input_file_resolver.py tests/integration/test_build_ontology_cli.py tests/server/test_ontology_http_app.py -q` and got `23 passed`
 - Re-ran `pytest tests -q` and got `85 passed`
-- Verified real `typedb_schema_v4.converted.md` contains all requested updated labels
+- Verified real `ttypedb_schema_v4.converted.md` contains all requested updated labels
 
 **Decisions made:**
 - Object type naming is still controlled deterministically in the renderer mapping table, not by prompt
@@ -164,7 +426,7 @@
 - Verified `pytest tests/ontology/test_definition_markdown_parser.py tests/pipelines/test_input_file_resolver.py tests/pipelines/test_tql_markdown_enhancer.py -q` -> `19 passed`
 - Verified `pytest tests/pipelines/test_input_file_resolver.py tests/integration/test_build_ontology_cli.py tests/server/test_ontology_http_app.py -q` -> `20 passed`
 - Verified `pytest tests -q` -> `82 passed`
-- Verified real `typedb_schema_v4.tql -> typedb_schema_v4.converted.md` now starts with the new headings and parses successfully with `21` objects / `42` relations
+- Verified real `typedb_schema_v4.tql -> ttypedb_schema_v4.converted.md` now starts with the new headings and parses successfully with `21` objects / `42` relations
 - Verified live `serve-ontology --input-file typedb_schema_v4.tql` smoke on port `8772`; `/api/graph` returned `200` with `63` elements
 
 **Decisions made:**
@@ -183,7 +445,7 @@
 - Re-ran `pytest tests/pipelines/test_tql_markdown_enhancer.py -v` and got `6 passed`
 - Re-ran focused regression tests and got `19 passed`
 - Re-ran `pytest tests -q` and got `80 passed`
-- Verified real `typedb_schema_v4.tql -> typedb_schema_v4.converted.md` now uses enhancement (`same_as_skeleton=False`) and still parses with `22` object types and `42` relations
+- Verified real `typedb_schema_v4.tql -> ttypedb_schema_v4.converted.md` now uses enhancement (`same_as_skeleton=False`) and still parses with `22` object types and `42` relations
 - Verified live `serve-ontology --input-file typedb_schema_v4.tql` smoke on port `8771`; `/api/graph` returned `200` with `64` elements
 
 **Decisions made:**
@@ -265,7 +527,7 @@
 - Added RED/GREEN tests proving `.tql` conversion can work without Qwen env vars and still feed the existing markdown parser/build pipeline
 - Added deterministic TQL schema extraction and fixed markdown rendering modules: `pipelines/tql_schema_models.py`, `pipelines/tql_schema_extractor.py`, `pipelines/tql_schema_renderer.py`
 - Updated `pipelines/tql_to_markdown.py` so `convert_tql_file_to_markdown_file(...)` now renders parser-compatible markdown locally and validates it with `parse_definition_markdown(...)` before writing
-- Verified real `typedb_schema_v4.tql` now converts successfully into `typedb_schema_v4.converted.md` with `22` object types and `42` relations
+- Verified real `typedb_schema_v4.tql` now converts successfully into `ttypedb_schema_v4.converted.md` with `22` object types and `42` relations
 - Verified live `serve-ontology --input-file typedb_schema_v4.tql` smoke on port `8771` and `/api/graph` returned successfully with `64` elements
 - Ran `pytest tests/pipelines/test_input_file_resolver.py tests/integration/test_build_ontology_cli.py tests/server/test_ontology_http_app.py -q` and got `16 passed`
 - Ran `pytest tests -q` and got `59 passed`
@@ -284,7 +546,7 @@
 - Updated the stale CLI integration test to match the current `.md`/`.tql` serve help contract
 - Ran `pytest tests/pipelines/test_input_file_resolver.py tests/integration/test_build_ontology_cli.py tests/server/test_ontology_http_app.py -q` and got `14 passed`
 - Ran `pytest tests -q` and got `57 passed`
-- Verified real `typedb_schema_v4.tql` conversion now completes and writes `typedb_schema_v4.converted.md`
+- Verified real `typedb_schema_v4.tql` conversion now completes and writes `ttypedb_schema_v4.converted.md`
 - Verified direct `serve-ontology --input-file typedb_schema_v4.tql` no longer fails on HTTP timeout; it now fails later because the generated markdown does not match parser-required structure
 
 **Decisions made:**
@@ -465,16 +727,4 @@
 **Open questions:**
 - None
 
-### 2026-03-17 18:08 - Codex
-**What was done:**
-- Rolled back progressive playback changes in `search/ontology_query_models.py`, `search/ontology_query_engine.py`, `server/ontology_http_service.py`, and `export/graph_export.py`
-- Restored legacy SSE payload shape and event order: `anchor_node -> expand_neighbors -> filter_nodes -> focus_subgraph -> evidence -> answer_done`
-- Removed playback controls, `PlaybackController`, snapshot replay logic, progressive metadata fields, pacing logic, and progressive playback tests
-- Re-ran the required focused verification commands and `pytest tests -q`
 
-**Decisions made:**
-- Kept the original ontology graph, QA assistant, SSE retrieval flow, and evidence clickback behavior
-- Standardized new rollback edits with unicode-safe literals to avoid shell encoding corruption
-
-**Open questions:**
-- None

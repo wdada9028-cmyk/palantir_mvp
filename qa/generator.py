@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from dataclasses import dataclass
@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator
 
 from .template_answering import TemplateAnswer, _dedupe_trace_steps, _relation_name, _summary_name
 from ..search.ontology_query_models import OntologyEvidenceBundle
+from ..instance_qa.llm_answer_context_builder import LLMAnswerContext
 
 _DEFAULT_MODEL = 'qwen2.5-32b-instruct'
 
@@ -86,8 +87,15 @@ def _load_config() -> GeneratorConfig | None:
     return GeneratorConfig(
         api_base=api_base,
         api_key=api_key,
-        model=os.getenv('QWEN_MODEL', _DEFAULT_MODEL).strip() or _DEFAULT_MODEL,
+        model=_get_env('QWEN_ANSWER_MODEL', 'QWEN_MODEL') or _DEFAULT_MODEL,
     )
+
+
+def _get_env(primary: str, fallback: str) -> str:
+    value = os.getenv(primary, '').strip()
+    if value:
+        return value
+    return os.getenv(fallback, '').strip()
 
 
 def _build_fact_lines(bundle: OntologyEvidenceBundle) -> list[str]:
@@ -103,7 +111,7 @@ def _build_fact_lines(bundle: OntologyEvidenceBundle) -> list[str]:
         if item.kind != 'relation' or len(item.node_ids) < 2:
             continue
         fallback_lines.append(
-            f'{_summary_name(bundle, item.node_ids[0])} [\u5173\u8054] {_summary_name(bundle, item.node_ids[1])}'
+            f'{_summary_name(bundle, item.node_ids[0])} [关联] {_summary_name(bundle, item.node_ids[1])}'
         )
     return _dedupe_preserve_order(fallback_lines)
 
@@ -114,22 +122,22 @@ def _build_messages(question: str, fact_lines: list[str]) -> list[dict[str, str]
         {
             'role': 'system',
             'content': (
-                '\u4f60\u662f\u4e91\u4ea4\u4ed8\u672c\u4f53\u95ee\u7b54\u52a9\u624b\u3002'
-                '\u53ea\u80fd\u6839\u636e\u63d0\u4f9b\u7684\u672c\u4f53\u4e8b\u5b9e\u751f\u6210\u9762\u5411\u7528\u6237\u7684\u7b54\u6848\u6458\u8981\uff0c\u4e0d\u5f97\u7f16\u9020\u5173\u7cfb\u3002'
-                '\u4e0d\u8981\u590d\u8ff0\u68c0\u7d22\u8def\u5f84\uff0c\u4e0d\u8981\u63cf\u8ff0\u4ece\u54ea\u4e2a\u8282\u70b9\u6269\u5c55\u5230\u54ea\u4e2a\u8282\u70b9\u3002'
-                '\u91cd\u70b9\u603b\u7ed3\u54ea\u4e9b\u5bf9\u8c61\u53d7\u5f71\u54cd\u3001\u4e3a\u4ec0\u4e48\u53d7\u5f71\u54cd\u3001\u5f71\u54cd\u8868\u73b0\u5728\u54ea\u91cc\u3002'
-                '\u8f93\u51fa\u901a\u987a\u81ea\u7136\u7684\u4e2d\u6587\uff0c\u53ef\u4ee5\u5408\u5e76\u591a\u6761\u5173\u7cfb\u5f62\u6210\u66f4\u9ad8\u5c42\u7ed3\u8bba\u3002'
-                '\u4e0d\u8981\u8f93\u51fa\u82f1\u6587\u5b9e\u4f53\u540d\uff0c\u4e0d\u8981\u8f93\u51fa\u8bc1\u636e\u7f16\u53f7\u3002'
-                '\u5982\u679c\u4e8b\u5b9e\u4e0d\u8db3\uff0c\u8bf7\u660e\u786e\u8bf4\u660e\u8bc1\u636e\u4e0d\u8db3\u3002'
+                '你是云交付本体问答助手。'
+                '只能根据提供的本体事实生成面向用户的答案摘要，不得编造关系。'
+                '不要复述检索路径，不要描述从哪个节点扩展到哪个节点。'
+                '重点总结哪些对象受影响、为什么受影响、影响表现在哪里。'
+                '输出通顺自然的中文，可以合并多条关系形成更高层结论。'
+                '不要输出英文实体名，不要输出证据编号。'
+                '如果事实不足，请明确说明证据不足。'
             ),
         },
         {
             'role': 'user',
             'content': (
-                f'\u7528\u6237\u95ee\u9898\uff1a{question}\n\n'
-                '\u4ec5\u53ef\u4f7f\u7528\u4ee5\u4e0b\u672c\u4f53\u4e8b\u5b9e\uff1a\n'
+                f'用户问题：{question}\n\n'
+                '仅可使用以下本体事实：\n'
                 f'{facts_block}\n\n'
-                '\u8bf7\u57fa\u4e8e\u8fd9\u4e9b\u4e8b\u5b9e\u751f\u6210\u7b54\u6848\u6458\u8981\u3002'
+                '请基于这些事实生成答案摘要。'
             ),
         },
     ]
@@ -162,3 +170,60 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
         seen.add(value)
         result.append(value)
     return result
+
+
+async def iter_generated_instance_answer(
+    question: str,
+    *,
+    schema_summary: dict[str, object],
+    fact_pack: dict[str, object],
+    reasoning_result: dict[str, object],
+    llm_answer_context: LLMAnswerContext | None = None,
+    fallback_answer: TemplateAnswer,
+) -> AsyncIterator[GeneratorChunk | GeneratorResult]:
+    config = _load_config()
+    if config is None or llm_answer_context is None:
+        yield GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+        return
+
+    messages = _build_instance_messages(question, llm_answer_context)
+    if not messages:
+        yield GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+        return
+
+    answer_parts: list[str] = []
+    try:
+        client = get_openai_client()
+        stream = await client.chat.completions.create(
+            model=config.model,
+            temperature=0.1,
+            stream=True,
+            messages=messages,
+        )
+        async for chunk in stream:
+            delta = _extract_delta_text(chunk)
+            if not delta:
+                continue
+            answer_parts.append(delta)
+            yield GeneratorChunk(delta=delta, answer_text_so_far=''.join(answer_parts))
+    except Exception:
+        yield GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+        return
+
+    answer_text = ''.join(answer_parts).strip()
+    if not answer_text:
+        yield GeneratorResult(answer_text=fallback_answer.answer, used_fallback=True)
+        return
+    yield GeneratorResult(answer_text=answer_text, used_fallback=False)
+
+
+def _build_instance_messages(question: str, llm_context: LLMAnswerContext) -> list[dict[str, str]]:
+    messages = llm_context.to_messages()
+    if len(messages) < 2:
+        return []
+    user_content = str(messages[1].get('content', ''))
+    messages[1] = {
+        'role': 'user',
+        'content': f'\u7528\u6237\u95ee\u9898\uff1a{question}\n\n{user_content}',
+    }
+    return messages
