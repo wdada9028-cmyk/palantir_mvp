@@ -261,3 +261,24 @@ def test_build_instance_template_answer_returns_clean_attribute_lookup_summary()
     assert answer.answer == 'POD-001 \u5f53\u524d\u72b6\u6001\u4e3a Installing\u3002'
     assert '*' not in answer.answer
     assert '?' not in answer.answer
+
+
+def test_build_instance_template_answer_returns_router_failure_message_instead_of_empty_project_hint():
+    fact_pack = {
+        'instances': {},
+        'metadata': {
+            'router_diagnostics': {
+                'status': 'failed',
+                'error_type': 'router_timeout',
+                'error_message': 'timeout',
+            },
+            'blocked_before_retrieval': True,
+            'anchor': {'entity': 'Project', 'id': 'POD-001'},
+        },
+    }
+
+    answer = build_instance_template_answer('POD-001???????', fact_pack, {})
+
+    assert '\u9519\u8bef\u7c7b\u578b\uff1arouter_timeout' in answer.answer
+    assert '\u6ca1\u6709\u7ee7\u7eed\u6267\u884c\u5b9e\u4f8b\u68c0\u7d22' in answer.answer
+    assert 'Project \u5f53\u524d\u672a\u547d\u4e2d\u5b9e\u4f8b\u6570\u636e' not in answer.answer

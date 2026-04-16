@@ -187,6 +187,38 @@ def _dedupe_preserve_order(values: list[str]) -> list[str]:
     return result
 
 
+
+
+def _build_router_failure_answer(question: str, metadata: dict[str, object]) -> TemplateAnswer:
+    diagnostics = metadata.get('router_diagnostics') if isinstance(metadata, dict) else {}
+    if not isinstance(diagnostics, dict) or str(diagnostics.get('status') or '').strip() != 'failed':
+        return TemplateAnswer(answer='', insufficient_evidence=False)
+
+    error_type = str(diagnostics.get('error_type') or 'router_unknown_error').strip()
+    possible_causes = {
+        'router_not_configured': ['路由模型配置缺失', '服务环境变量未正确加载'],
+        'router_timeout': ['路由模型请求超时', '模型服务当前负载较高'],
+        'router_connect_error': ['路由模型服务连接失败', '网络或服务地址不可达'],
+        'router_invalid_json': ['路由模型返回内容不是合法 JSON', '模型输出格式未满足约束'],
+        'router_invalid_payload': ['路由模型返回字段不完整', '模型输出未满足受控 payload 约束'],
+        'router_validation_failed': ['路由结果未通过 schema 校验', '识别出的实体或属性不符合当前本体定义'],
+        'router_unknown_error': ['路由链路出现未分类异常'],
+    }.get(error_type, ['路由链路出现未分类异常'])
+    suggestions = [
+        '请重试一次',
+        '如持续失败，请检查路由模型服务配置与连接状态',
+    ]
+    causes_text = '；'.join(possible_causes)
+    suggestions_text = '；'.join(suggestions)
+    answer = (
+        f'本次未能完成问题识别，因此没有继续执行实例检索。'
+        f'错误类型：{error_type}。'
+        f'可能原因：{causes_text}。'
+        f'建议：{suggestions_text}。'
+    )
+    return TemplateAnswer(answer=answer, insufficient_evidence=True)
+
+
 def build_instance_template_answer(question: str, fact_pack: dict[str, object], reasoning_result: dict[str, object]) -> TemplateAnswer:
     instances = fact_pack.get('instances') if isinstance(fact_pack, dict) else {}
     instance_count = 0
@@ -200,6 +232,10 @@ def build_instance_template_answer(question: str, fact_pack: dict[str, object], 
         metadata = {}
     target_attributes = metadata.get('target_attributes') if isinstance(metadata.get('target_attributes'), list) else []
     anchor = metadata.get('anchor') if isinstance(metadata.get('anchor'), dict) else {}
+
+    router_failure_answer = _build_router_failure_answer(question, metadata)
+    if router_failure_answer.answer:
+        return router_failure_answer
 
     if target_attributes and instance_count > 0:
         anchor_entity = str(anchor.get('entity') or '').strip()

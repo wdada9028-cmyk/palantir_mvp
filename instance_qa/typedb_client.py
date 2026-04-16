@@ -120,6 +120,15 @@ class TypeDBClient:
     def config(self) -> TypeDBConfig:
         return self._config
 
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+        return False
+
     def connect(self) -> None:
         try:
             from typedb.driver import Credentials, DriverOptions, TypeDB

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .evidence_models import EvidenceBundle
-from .prompts import EVIDENCE_CONTRACT_PROMPT, STYLE_PROMPT, SYSTEM_PROMPT, TASK_PROMPT
+from .prompts import EVIDENCE_CONTRACT_PROMPT, ERROR_HANDLING_PROMPT, STYLE_PROMPT, SYSTEM_PROMPT, TASK_PROMPT
 
 
 @dataclass(slots=True)
@@ -21,6 +21,7 @@ class LLMAnswerContext:
             f"{self.task_prompt}\n\n"
             f"{self.evidence_contract_prompt}\n\n"
             f"{self.style_prompt}\n\n"
+            f"{ERROR_HANDLING_PROMPT}\n\n"
             f"evidence_payload:\n{json.dumps(self.user_payload, ensure_ascii=False)}"
         )
         return [
@@ -51,4 +52,6 @@ def _build_user_payload(bundle: EvidenceBundle) -> dict[str, Any]:
         'empty_entities': data.get('empty_entities', []),
         'unrelated_entities': data.get('unrelated_entities', []),
         'omitted_entities': data.get('omitted_entities', []),
+        'router_diagnostics': data.get('understanding', {}).get('router_diagnostics', {}),
+        'blocked_before_retrieval': bool(data.get('understanding', {}).get('blocked_before_retrieval', False)),
     }
